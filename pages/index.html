@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>echarts</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body,
+        #container {
+            height: 100%;
+        }
+
+        #container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .item {
+            width: calc(100% - 30%);
+            height: 50%;
+            overflow: hidden;
+        }
+
+        .summary {
+            flex: none;
+            width: 30%;
+            height: 50%;
+            background-color: #fef8ef;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            line-height: 24px;
+            font-size: 16px;
+            color: #999;
+        }
+
+        .summary .tit {}
+
+        .summary .now {}
+
+        .summary .mm {}
+
+        .summary .cs {}
+
+        .summary .t {}
+        .summary .bs .b{
+            color: #4aff2e;
+        }
+        .summary .bs .s{
+            color: #fa364f;
+        }
+
+        .today {
+            flex: none;
+            width: 100%;
+            height: 50%;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div id="container">
+    </div>
+    <script src="./static/echarts.min.js"></script>
+    <script src="./static/vintage.js"></script>
+    <script>
+        class Chat {
+            chat = null;
+            dom = null;
+            config = null;
+            constructor(config) {
+                this.config = config;
+                this.initChat();
+                this.query();
+            }
+            initChat() {
+                this.dom = document.createElement('div');
+                this.dom.className = this.config.class;
+                this.config.container.appendChild(this.dom);
+                this.chart = echarts.init(this.dom, 'vintage', {
+                    renderer: 'canvas',
+                    useDirtyRect: false
+                });
+                this.chart.setOption(this.config.options);
+                window.addEventListener('resize', this.chart.resize);
+            }
+            disposeChat() {
+                window.removeEventListener('resize', this.chart.resize);
+                this.chart.dispose();
+                this.dom.remove();
+            }
+            setOption(option) {
+                this.chart.setOption(option);
+                this.chart.resize();
+            }
+            query() {
+                return this.config.query((data) => {
+                    this.setOption(this.config.getOptions(data));
+                });
+            }
+        }
+
+
+        class Summary {
+            config = null;
+            dom = null;
+            colums = {
+                now: '实时',
+                max: '最高',
+                min: '最低',
+                time: 'time',
+                close: '昨收',
+                open: '今开',
+                date: 'date',
+                title: 'title'
+            }
+            constructor(config) {
+                this.config = config;
+                this.init();
+            }
+            init() {
+                this.dom = document.createElement('div');
+                this.dom.className = this.config.class;
+                this.config.container.appendChild(this.dom);
+                this.query();
+            }
+            dispose() {
+                this.dom.remove();
+            }
+            query() {
+                this.config.query((data) => {
+                    this.render(data);
+                });
+            }
+            render(data) {
+                this.dom.innerHTML = this.renderPart(data.autd);
+            }
+            renderPart(data) {
+                return `
+                <p class="tit">${data.title}</p>
+                <p class="now">${this.colums.now}: <b>${data.now}</b></p>
+                <p class="mm" >
+                    <span>${this.colums.max}: <b>${data.max}</b></span> - 
+                    <span>${this.colums.min}: <b>${data.min}</b></span>
+                </p>
+                <p class="cs">
+                    <span>${this.colums.close}: <b>${data.close}</b></span> - 
+                    <span>${this.colums.open}: <b>${data.open}</b></span>
+                </p>
+                <p class="t"> 更新时间: ${data.date}  ${data.time}</p>
+                <p class="bs">
+                    <span>买入区间: <b class="b">■</b></span> 
+                    <span>卖出区间: <b class="s">■</b></span>
+                </p>
+                `
+            }
+        }
+
+
+        const config = [
+            {
+                ViewChat: Summary,
+                class: 'summary',
+                query: (callback) => {
+                    return fetch(`./api/summary`).then((data) => {
+                        return data.json()
+                    }).then((data) => {
+                        callback(data)
+                    })
+                }
+            },
+            {
+                ViewChat: Chat,
+                class: 'item',
+                options: {
+                    title: {
+                        text: 'last month price',
+                        left: '1%'
+                    },
+                    tooltip: {
+                        trigger: 'axis'
+                    },
+                    grid: {
+                        left: '5%',
+                        right: '15%',
+                        bottom: '10%'
+                    },
+                    xAxis: {
+                        data: []
+                    },
+                    yAxis: {},
+                    toolbox: {
+                        right: 10,
+                        feature: {
+                            dataZoom: {
+                                yAxisIndex: 'none'
+                            },
+                            restore: {},
+                            saveAsImage: {}
+                        }
+                    },
+                    visualMap: {
+                        top: 50,
+                        right: 10,
+                        pieces: [
+                            {
+                                lte: 300,
+                                color: '#AA069F'
+                            },
+                            {
+                                gt: 300,
+                                color: '#AC3B2A'
+                            }
+                        ],
+                        outOfRange: {
+                            color: '#999'
+                        }
+                    },
+                    series: {
+                        name: 'price',
+                        type: 'line',
+                        data: [],
+                        markLine: {
+                            silent: true,
+                            lineStyle: {
+                                color: '#333'
+                            },
+                            data: [
+                                {
+                                    yAxis: 300
+                                }
+                            ]
+                        }
+                    }
+                },
+                query: (callback) => {
+                    return fetch(`./api/month`).then((data) => {
+                        return data.json()
+                    }).then(callback)
+                },
+                getOptions: (data) => {
+                    const values = data.map(function (item) {
+                        return item.price;
+                    });
+                    const maxValue = Math.max(...values);
+                    const minValue = Math.min(...values);
+                    const middleValue = Math.round((maxValue + minValue) * 100 / 2) / 100;
+                    const gapValue = Math.ceil((maxValue - minValue) * 100) / 100;
+                    const gap = Math.ceil((gapValue / 5) * 100) / 100;
+                    const bottomBase = Math.round((minValue + gap) * 100) / 100;
+                    const topBase = Math.round((maxValue - gap) * 100) / 100;
+
+                    return {
+                        yAxis: {
+                            min: Math.floor((minValue - 1) / 10) * 10,
+                        },
+                        xAxis: {
+                            data: data.map(function (item) {
+                                const date = new Date(item.date_time);
+                                return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+                            }),
+                        },
+                        visualMap: {
+                            pieces: [
+                                {
+                                    lte: bottomBase,
+                                    color: '#4aff2e'
+                                },
+                                {
+                                    gt: bottomBase,
+                                    lte: topBase,
+                                    color: '#af792a'
+                                },
+                                {
+                                    gt: topBase,
+                                    color: '#fa364f'
+                                }
+                            ]
+                        },
+                        series: {
+                            data: values,
+                            markLine: {
+                                data: [
+                                    {
+                                        yAxis: bottomBase
+                                    },
+                                    {
+                                        yAxis: topBase
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                }
+
+            },
+            {
+                ViewChat: Chat,
+                class: 'today item',
+                options: {
+                    title: {
+                        text: 'today price',
+                        left: '1%'
+                    },
+                    tooltip: {
+                        trigger: 'axis'
+                    },
+                    grid: {
+                        left: '5%',
+                        right: '15%',
+                        bottom: '10%'
+                    },
+                    xAxis: {
+                        data: []
+                    },
+                    yAxis: {},
+                    toolbox: {
+                        right: 10,
+                        feature: {
+                            dataZoom: {
+                                yAxisIndex: 'none'
+                            },
+                            restore: {},
+                            saveAsImage: {}
+                        }
+                    },
+                    visualMap: {
+                        top: 50,
+                        right: 10,
+                        pieces: [
+                            {
+                                lte: 300,
+                                color: '#AA069F'
+                            },
+                            {
+                                gt: 300,
+                                color: '#AC3B2A'
+                            }
+                        ],
+                        outOfRange: {
+                            color: '#999'
+                        }
+                    },
+                    series: {
+                        name: 'price',
+                        type: 'line',
+                        data: [],
+                        markLine: {
+                            silent: true,
+                            lineStyle: {
+                                color: '#333'
+                            },
+                            data: [
+                                {
+                                    yAxis: 300
+                                }
+                            ]
+                        }
+                    }
+                },
+                query: (callback) => {
+                    return fetch(`./api/today`).then((data) => {
+                        return data.json()
+                    }).then(callback)
+                },
+                getOptions: (data) => {
+                    const values = data.map(function (item) {
+                        return item.price;
+                    });
+                    const maxValue = Math.max(...values);
+                    const minValue = Math.min(...values);
+                    const middleValue = Math.round((maxValue + minValue) * 100 / 2) / 100;
+                    const gapValue = Math.ceil((maxValue - minValue) * 100) / 100;
+                    const gap = Math.ceil((gapValue / 3) * 100) / 100;
+                    const bottomBase = Math.round((maxValue - gap * 2) * 100) / 100;
+                    const topBase = Math.round((maxValue - gap) * 100) / 100;
+
+                    return {
+                        yAxis: {
+                            min: Math.floor((minValue - 1) / 10) * 10,
+                        },
+                        xAxis: {
+                            data: data.map(function (item) {
+                                const date = new Date(item.date_time);
+                                return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+                            }),
+                        },
+                        visualMap: {
+                            pieces: [
+                                {
+                                    lte: bottomBase,
+                                    color: '#4aff2e'
+                                },
+                                {
+                                    gt: bottomBase,
+                                    lte: topBase,
+                                    color: '#af792a'
+                                },
+                                {
+                                    gt: topBase,
+                                    color: '#fa364f'
+                                }
+                            ]
+                        },
+                        series: {
+                            data: values,
+                            markLine: {
+                                data: [
+                                    {
+                                        yAxis: bottomBase
+                                    },
+                                    {
+                                        yAxis: topBase
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+
+        window.onload = function () {
+            // hq_str_gds_AUTD
+            const $container = document.getElementById('container')
+            config.map(config => {
+                const chat = new config.ViewChat({
+                    ...config,
+                    container: $container
+                });
+            })
+        }
+    </script>
+</body>
+
+</html>
