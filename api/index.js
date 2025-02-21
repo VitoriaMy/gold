@@ -6,7 +6,7 @@ import query from "./query.js";
 const router = Router();
 router.use((req, res, next) => {
     // 禁用缓存
-    // res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Cache-Control", "no-store");
     next();
 });
 

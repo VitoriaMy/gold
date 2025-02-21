@@ -73,6 +73,7 @@
 <body>
     <div id="container">
     </div>
+    <script src="./static/dayjs.min.js"></script>
     <script src="./static/echarts.min.js"></script>
     <script src="./static/vintage.js"></script>
     <script>
@@ -269,8 +270,7 @@
                         xAxis: {
                             data: data.map(function (item) {
                                 const date = new Date(item.date_time);
-                                return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-
+                                return dayjs(item.date_time).format('MM-DD HH:mm');
                             }),
                         },
                         visualMap: {
@@ -394,8 +394,7 @@
                         },
                         xAxis: {
                             data: data.map(function (item) {
-                                const date = new Date(item.date_time);
-                                return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                                return dayjs(item.date_time).format('MM-DD HH:mm');
 
                             }),
                         },
