@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
+  "description": "金价24h/30d走势",
   "type": "module",
   "dependencies": {
     "axios": "^1.7.9",
