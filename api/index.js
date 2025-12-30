@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as dataAPI from "./dataAPI.js";
 import query from "./query.js";
+import { upsertGoldSeries } from "../db/goldSeries.js";
 
 
 const router = Router();
@@ -30,6 +31,14 @@ router.get("/today", async (req, res) => {
         data
     } = result;
     if (status === 200) {
+        try {
+            upsertGoldSeries({
+                range: "1d",
+                payload: data,
+            });
+        } catch {
+            // ignore logging errors
+        }
         res.json(data);
     } else {
         res.status(status).send(result.message);
@@ -43,6 +52,14 @@ router.get("/month", async (req, res) => {
         data
     } = result;
     if (status === 200) {
+        try {
+            upsertGoldSeries({
+                range: "30d",
+                payload: data,
+            });
+        } catch {
+            // ignore logging errors
+        }
         res.json(data);
     } else {
         res.status(status).send(result.message);

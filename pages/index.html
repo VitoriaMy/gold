@@ -54,6 +54,14 @@
         .summary .cs {}
 
         .summary .t {}
+        .summary .actions {
+            margin-top: 6px;
+            font-size: 12px;
+        }
+        .summary .refresh {
+            cursor: pointer;
+            text-decoration: underline;
+        }
         .summary .bs .b{
             color: #4aff2e;
         }
@@ -81,10 +89,25 @@
             chat = null;
             dom = null;
             config = null;
+            handleResize = null;
             constructor(config) {
                 this.config = config;
                 this.initChat();
                 this.query();
+            }
+            setLoading(isLoading) {
+                if (!this.chart) return;
+                try {
+                    if (isLoading) {
+                        this.chart.showLoading('default', {
+                            text: 'loading...'
+                        });
+                    } else {
+                        this.chart.hideLoading();
+                    }
+                } catch (e) {
+                    // ignore if chart disposed during async request
+                }
             }
             initChat() {
                 this.dom = document.createElement('div');
@@ -95,10 +118,21 @@
                     useDirtyRect: false
                 });
                 this.chart.setOption(this.config.options);
-                window.addEventListener('resize', this.chart.resize);
+
+                // ECharts toolbox 的“还原/刷新(restore)”会把图表恢复到初始 option。
+                // 当前初始 option 的 data 为空数组，所以点击后会变空白。
+                // 这里监听 restore 事件并重新拉取数据覆盖回去。
+                this.chart.on('restore', () => {
+                    this.query();
+                });
+
+                this.handleResize = () => this.chart.resize();
+                window.addEventListener('resize', this.handleResize);
             }
             disposeChat() {
-                window.removeEventListener('resize', this.chart.resize);
+                if (this.handleResize) {
+                    window.removeEventListener('resize', this.handleResize);
+                }
                 this.chart.dispose();
                 this.dom.remove();
             }
@@ -107,9 +141,18 @@
                 this.chart.resize();
             }
             query() {
-                return this.config.query((data) => {
-                    this.setOption(this.config.getOptions(data));
-                });
+                this.setLoading(true);
+                return Promise.resolve(
+                    this.config.query((data) => {
+                        this.setOption(this.config.getOptions(data));
+                    })
+                )
+                    .catch((err) => {
+                        console.error('chat query failed:', err);
+                    })
+                    .finally(() => {
+                        this.setLoading(false);
+                    });
             }
         }
 
@@ -117,6 +160,7 @@
         class Summary {
             config = null;
             dom = null;
+            onClick = null;
             colums = {
                 now: '实时',
                 max: '最高',
@@ -135,15 +179,40 @@
                 this.dom = document.createElement('div');
                 this.dom.className = this.config.class;
                 this.config.container.appendChild(this.dom);
+
+                this.onClick = (e) => {
+                    const target = e.target;
+                    if (target && target.classList && target.classList.contains('refresh')) {
+                        this.query();
+                    }
+                }
+                this.dom.addEventListener('click', this.onClick);
+
                 this.query();
             }
             dispose() {
+                if (this.onClick) {
+                    this.dom.removeEventListener('click', this.onClick);
+                }
                 this.dom.remove();
             }
+            setLoading(isLoading) {
+                if (!this.dom) return;
+                if (isLoading) {
+                    this.dom.innerHTML = '<p>loading...</p>';
+                }
+            }
             query() {
-                this.config.query((data) => {
-                    this.render(data);
-                });
+                this.setLoading(true);
+                return Promise.resolve(
+                    this.config.query((data) => {
+                        this.render(data);
+                    })
+                )
+                    .catch((err) => {
+                        console.error('summary query failed:', err);
+                        this.dom.innerHTML = '<p>load failed</p><p class="actions"><span class="refresh">刷新</span></p>';
+                    });
             }
             render(data) {
                 this.dom.innerHTML = this.renderPart(data.autd);
@@ -151,6 +220,7 @@
             renderPart(data) {
                 return `
                 <p class="tit">${data.title}</p>
+                <p class="actions"><span class="refresh">刷新</span></p>
                 <p class="now">${this.colums.now}: <b>${data.now}</b></p>
                 <p class="mm" >
                     <span>${this.colums.max}: <b>${data.max}</b></span> - 
@@ -252,6 +322,12 @@
                     }).then(callback)
                 },
                 getOptions: (data) => {
+                    if (!Array.isArray(data) || data.length === 0) {
+                        return {
+                            xAxis: { data: [] },
+                            series: { data: [] }
+                        }
+                    }
                     const values = data.map(function (item) {
                         return item.price;
                     });
@@ -377,6 +453,12 @@
                     }).then(callback)
                 },
                 getOptions: (data) => {
+                    if (!Array.isArray(data) || data.length === 0) {
+                        return {
+                            xAxis: { data: [] },
+                            series: { data: [] }
+                        }
+                    }
                     const values = data.map(function (item) {
                         return item.price;
                     });

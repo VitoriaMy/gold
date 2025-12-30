@@ -9,7 +9,12 @@ export default async function query(configs){
         message: "Not Found"
     };
     try {
-        return await ajax(config)
+        const response = await ajax(config);
+        response.__fetchMeta = {
+            url: config.url,
+            method: config.method,
+        };
+        return response;
     } catch (error) {
         return query(otherConfigs)
     }
