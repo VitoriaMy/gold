@@ -237,6 +237,51 @@
 
         .summary .risk input[type="range"] {
             flex: 1;
+            width: 100%;
+            cursor: pointer;
+            touch-action: pan-x;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* 让滑条更易拖拽（尤其移动端） */
+        .summary .risk input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 28px;
+            background: transparent;
+        }
+
+        .summary .risk input[type="range"]::-webkit-slider-runnable-track {
+            height: 8px;
+            background: rgba(15, 23, 42, 0.12);
+            border-radius: 999px;
+        }
+
+        .summary .risk input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            margin-top: -5px;
+            border-radius: 999px;
+            background: #2563eb;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
+        }
+
+        .summary .risk input[type="range"]::-moz-range-track {
+            height: 8px;
+            background: rgba(15, 23, 42, 0.12);
+            border-radius: 999px;
+        }
+
+        .summary .risk input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            background: #2563eb;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
         }
 
         .summary .risk .risk-labels {
@@ -411,6 +456,15 @@
                         el.textContent = dayjs().format('YYYY-MM-DD HH:mm:ss');
                     } catch {
                         el.textContent = String(new Date());
+                    }
+                }
+
+                function updateDocumentTitle() {
+                    try {
+                        const pageUpdate = (typeof window !== 'undefined') ? window.__pageUpdateTimeText : '';
+                        document.title = pageUpdate ? `实时金价-${pageUpdate}` : '实时金价';
+                    } catch {
+                        // ignore
                     }
                 }
 
@@ -1069,14 +1123,14 @@ ${containerHtml}
             return Math.round(k * 100) / 100;
         }
 
-        function computeSuggestionContext({ history30d, currentPrice }) {
-            if (!Array.isArray(history30d) || history30d.length < 20) return null;
+        function computeSuggestionContextFromRows({ rows, currentPrice, minPoints = 20 }) {
+            if (!Array.isArray(rows) || rows.length < minPoints) return null;
             if (!Number.isFinite(currentPrice)) return null;
 
-            const points = history30d
-                .map(p => ({ x: toNumber(p.date_time), y: toNumber(p.price) }))
+            const points = rows
+                .map(p => ({ x: toNumber(p?.date_time), y: toNumber(p?.price) }))
                 .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
-            if (points.length < 20) return null;
+            if (points.length < minPoints) return null;
 
             const model = fitBestTrendModel(points) || fitBestPolynomialTrend(points, 3);
             if (!model || typeof model.predict !== 'function') return null;
@@ -1084,7 +1138,8 @@ ${containerHtml}
             const xs = points.map(p => p.x);
             const xMin = Math.min(...xs);
             const xMax = Math.max(...xs);
-            const xNow = clamp(Date.now(), xMin, xMax);
+            const lastX = points[points.length - 1]?.x;
+            const xNow = Number.isFinite(lastX) ? lastX : clamp(Date.now(), xMin, xMax);
             const trendNow = model.predict(xNow);
             if (!Number.isFinite(trendNow)) return null;
 
@@ -1099,7 +1154,7 @@ ${containerHtml}
                 sum2 += r * r;
                 n++;
             }
-            if (n < 10) return null;
+            if (n < Math.min(10, minPoints)) return null;
             const mean = sum / n;
             const variance = Math.max(0, sum2 / n - mean * mean);
             const std = Math.sqrt(variance) || 0;
@@ -1147,8 +1202,10 @@ ${containerHtml}
             onClick = null;
             onInput = null;
             risk = 50;
-            suggestionCtx = null;
+            suggestionCtxHistory = null;
+            suggestionCtxRealtime = null;
             lastSummary = null;
+            riskDebounceTimer = null;
             colums = {
                 now: '实时',
                 max: '最高',
@@ -1194,11 +1251,17 @@ ${containerHtml}
                             } catch {
                                 // ignore
                             }
-                            // Re-render using cached context
-                            const suggestion = computeBuySellSuggestionFromContext(this.suggestionCtx, this.risk);
-                            if (this.lastSummary) {
-                                this.render({ ...this.lastSummary, suggestion });
+                            // 只立即更新“风险偏好”数值；后续计算延迟 300ms（debounce）避免频繁触发
+                            this.updateSuggestionUI(null);
+
+                            if (this.riskDebounceTimer) {
+                                clearTimeout(this.riskDebounceTimer);
                             }
+                            this.riskDebounceTimer = setTimeout(() => {
+                                const historySuggestion = computeBuySellSuggestionFromContext(this.suggestionCtxHistory, this.risk);
+                                const realtimeSuggestion = computeBuySellSuggestionFromContext(this.suggestionCtxRealtime, this.risk);
+                                this.updateSuggestionUI({ history: historySuggestion, realtime: realtimeSuggestion });
+                            }, 300);
                         }
                     }
                 };
@@ -1226,10 +1289,12 @@ ${containerHtml}
                 return Promise.resolve(
                     this.config.query((data) => {
                         // Cache context for slider updates
-                        this.suggestionCtx = data.__ctx || null;
+                        this.suggestionCtxHistory = data.__ctxHistory || null;
+                        this.suggestionCtxRealtime = data.__ctxRealtime || null;
                         this.lastSummary = data;
-                        const suggestion = computeBuySellSuggestionFromContext(this.suggestionCtx, this.risk);
-                        this.render({ ...data, suggestion });
+                        const suggestionHistory = computeBuySellSuggestionFromContext(this.suggestionCtxHistory, this.risk);
+                        const suggestionRealtime = computeBuySellSuggestionFromContext(this.suggestionCtxRealtime, this.risk);
+                        this.render({ ...data, suggestionHistory, suggestionRealtime });
                     })
                 )
                     .catch((err) => {
@@ -1240,25 +1305,59 @@ ${containerHtml}
             render(data) {
                 // 将页面展示的“更新时间”同步到打印头部（导出/菜单打印都复用）
                 try {
-                    if (data && data.date && data.time) {
-                        window.__pageUpdateTimeText = `${data.date} ${data.time}`;
+                    const u = (data && data.autd) ? data.autd : data;
+                    if (u && u.date && u.time) {
+                        // 与页面显示的“更新时间”保持一致
+                        window.__pageUpdateTimeText = `${u.date} ${u.time}`;
                         updatePrintHeaderTime();
                         updateDocumentTitle();
                     }
                 } catch {
                     // ignore
                 }
-                this.dom.innerHTML = this.renderPart(data.autd, data.suggestion);
+                this.dom.innerHTML = this.renderPart(data.autd, data.suggestionHistory, data.suggestionRealtime);
+                // 首次渲染后同步一次 UI（保证 class hook 存在时能更新）
+                this.updateSuggestionUI({ history: data.suggestionHistory, realtime: data.suggestionRealtime });
             }
-            function updateDocumentTitle() {
+
+            updateSuggestionUI(suggestions) {
                 try {
-                    const pageUpdate = (typeof window !== 'undefined') ? window.__pageUpdateTimeText : '';
-                    document.title = pageUpdate ? `实时金价-${pageUpdate}` : '实时金价';
+                    if (!this.dom) return;
+                    const historySuggestion = suggestions && typeof suggestions === 'object' ? suggestions.history : null;
+                    const realtimeSuggestion = suggestions && typeof suggestions === 'object' ? suggestions.realtime : null;
+
+                    const riskEl = this.dom.querySelector('.risk-value');
+                    if (riskEl) riskEl.textContent = String(this.risk);
+
+                    const setText = (sel, text) => {
+                        const el = this.dom.querySelector(sel);
+                        if (el) el.textContent = String(text ?? '');
+                    };
+
+                    if (historySuggestion) {
+                        setText('.suggest-h-action', historySuggestion.action);
+                        setText('.suggest-h-buy', historySuggestion.buy);
+                        setText('.suggest-h-sell', historySuggestion.sell);
+                        setText('.suggest-h-model', historySuggestion.model);
+                        setText('.suggest-h-note', historySuggestion.note);
+                        setText('.suggest-h-current', historySuggestion.currentPrice);
+                        setText('.suggest-h-trend', historySuggestion.trendNow);
+                    }
+
+                    if (realtimeSuggestion) {
+                        setText('.suggest-r-action', realtimeSuggestion.action);
+                        setText('.suggest-r-buy', realtimeSuggestion.buy);
+                        setText('.suggest-r-sell', realtimeSuggestion.sell);
+                        setText('.suggest-r-model', realtimeSuggestion.model);
+                        setText('.suggest-r-note', realtimeSuggestion.note);
+                        setText('.suggest-r-current', realtimeSuggestion.currentPrice);
+                        setText('.suggest-r-trend', realtimeSuggestion.trendNow);
+                    }
                 } catch {
                     // ignore
                 }
             }
-            renderPart(data, suggestion) {
+            renderPart(data, suggestionHistory, suggestionRealtime) {
                 return `
                 <p class="tit">${data.title}</p>
                 <p class="actions"><span class="refresh">刷新</span></p>
@@ -1277,10 +1376,10 @@ ${containerHtml}
                     <span>卖出区间: <b class="s">■</b></span>
                 </p>
                 <div class="risk">
-                    <div class="risk-tit">风险偏好：<b>${(suggestion && Number.isFinite(suggestion.risk)) ? suggestion.risk : this.risk}</b></div>
+                    <div class="risk-tit">风险偏好：<b class="risk-value">${this.risk}</b></div>
                     <div class="risk-row">
                         <span style="font-size:12px;color:#999;">保守</span>
-                        <input class="risk-range" type="range" min="0" max="100" value="${(suggestion && Number.isFinite(suggestion.risk)) ? suggestion.risk : this.risk}" />
+                        <input class="risk-range" type="range" min="0" max="100" value="${this.risk}" />
                         <span style="font-size:12px;color:#999;">激进</span>
                     </div>
                     <div class="risk-labels">
@@ -1288,19 +1387,58 @@ ${containerHtml}
                         <span>信号更频繁</span>
                     </div>
                 </div>
-                ${suggestion ? `
                 <p class="rec">
-                    建议: <b>${suggestion.action}</b>
-                    <span class="rec-p">买入点: <b class="b">${suggestion.buy}</b></span>
-                    <span class="rec-p">卖出点: <b class="s">${suggestion.sell}</b></span>
+                    历史建议: <b class="suggest-h-action">${suggestionHistory ? suggestionHistory.action : '—'}</b>
+                    <span class="rec-p">买入点: <b class="b suggest-h-buy">${suggestionHistory ? suggestionHistory.buy : '—'}</b></span>
+                    <span class="rec-p">卖出点: <b class="s suggest-h-sell">${suggestionHistory ? suggestionHistory.sell : '—'}</b></span>
                 </p>
-                <p class="rec2">趋势函数: ${suggestion.model}（${suggestion.note}）</p>
+                <p class="rec2">
+                    ${suggestionHistory
+                        ? `趋势函数: <span class="suggest-h-model">${suggestionHistory.model}</span>（<span class="suggest-h-note">${suggestionHistory.note}</span>）`
+                        : `趋势函数: <span class="suggest-h-model">—</span>（<span class="suggest-h-note">需要已保存30天数据(≥20条)以计算建议</span>）`
+                    }
+                </p>
                 <p class="rec3">
                     判定规则：若实时价 ≤ 买入点 → 偏买入；若实时价 ≥ 卖出点 → 偏卖出；否则观望。
-                    当前实时价=${suggestion.currentPrice}，趋势值=${suggestion.trendNow}。
+                    当前实时价=<span class="suggest-h-current">${suggestionHistory ? suggestionHistory.currentPrice : '—'}</span>，趋势值=<span class="suggest-h-trend">${suggestionHistory ? suggestionHistory.trendNow : '—'}</span>。
                 </p>
-                ` : ``}
+
+                <p class="rec" style="margin-top:10px;">
+                    实时建议: <b class="suggest-r-action">${suggestionRealtime ? suggestionRealtime.action : '—'}</b>
+                    <span class="rec-p">买入点: <b class="b suggest-r-buy">${suggestionRealtime ? suggestionRealtime.buy : '—'}</b></span>
+                    <span class="rec-p">卖出点: <b class="s suggest-r-sell">${suggestionRealtime ? suggestionRealtime.sell : '—'}</b></span>
+                </p>
+                <p class="rec2">
+                    ${suggestionRealtime
+                        ? `趋势函数: <span class="suggest-r-model">${suggestionRealtime.model}</span>（<span class="suggest-r-note">${suggestionRealtime.note}</span>）`
+                        : `趋势函数: <span class="suggest-r-model">—</span>（<span class="suggest-r-note">需要 today price 数据(≥12条)以计算建议</span>）`
+                    }
+                </p>
+                <p class="rec3">
+                    判定规则：若实时价 ≤ 买入点 → 偏买入；若实时价 ≥ 卖出点 → 偏卖出；否则观望。
+                    当前实时价=<span class="suggest-r-current">${suggestionRealtime ? suggestionRealtime.currentPrice : '—'}</span>，趋势值=<span class="suggest-r-trend">${suggestionRealtime ? suggestionRealtime.trendNow : '—'}</span>。
+                </p>
                 `
+            }
+        }
+
+
+        function buildNormalizedTrendForRows(rows) {
+            // 对 (date_time, price) 做归一化拟合，返回趋势模型与趋势值（用于图表叠加趋势线）
+            try {
+                if (!Array.isArray(rows) || rows.length < 5) return null;
+                const points = rows
+                    .map(item => ({ x: toNumber(item?.date_time), y: toNumber(item?.price) }))
+                    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+                if (points.length < 5) return null;
+
+                const model = fitBestTrendModel(points) || fitBestPolynomialTrend(points, 3);
+                if (!model || typeof model.predict !== 'function') return null;
+
+                const trendValues = rows.map(item => model.predict(toNumber(item?.date_time)));
+                return { model, trendValues };
+            } catch {
+                return null;
             }
         }
 
@@ -1312,12 +1450,18 @@ ${containerHtml}
                 query: (callback) => {
                     return Promise.all([
                         fetch(`./api/summary`).then((r) => r.json()),
-                        fetch(`./api/month_saved`).then((r) => r.json()).catch(() => [])
-                    ]).then(([summary, saved30d]) => {
-                        const currentPrice = toNumber(summary?.autd?.now);
+                        fetch(`./api/month_saved`).then((r) => r.json()).catch(() => []),
+                        fetch(`./api/today`).then((r) => r.json()).catch(() => [])
+                    ]).then(([summary, saved30d, todayRows]) => {
+                        const currentPriceHistory = toNumber(summary?.autd?.now);
+                        const lastToday = Array.isArray(todayRows) && todayRows.length ? todayRows[todayRows.length - 1] : null;
+                        const currentPriceRealtime = toNumber(lastToday?.price);
+                        const currentPriceRealtimeFallback = Number.isFinite(currentPriceRealtime) ? currentPriceRealtime : currentPriceHistory;
+
                         // Cache context for slider updates.
-                        const ctx = computeSuggestionContext({ history30d: saved30d, currentPrice });
-                        callback({ ...summary, __ctx: ctx });
+                        const ctxHistory = computeSuggestionContextFromRows({ rows: saved30d, currentPrice: currentPriceHistory, minPoints: 20 });
+                        const ctxRealtime = computeSuggestionContextFromRows({ rows: todayRows, currentPrice: currentPriceRealtimeFallback, minPoints: 12 });
+                        callback({ ...summary, __ctxHistory: ctxHistory, __ctxRealtime: ctxRealtime });
                     })
                 }
             },
@@ -1333,9 +1477,10 @@ ${containerHtml}
                         trigger: 'axis'
                     },
                     grid: {
-                        left: '5%',
+                        left: 48,
                         right: '15%',
-                        bottom: '10%'
+                        bottom: '10%',
+                        containLabel: true
                     },
                     xAxis: {
                         data: []
@@ -1368,22 +1513,36 @@ ${containerHtml}
                             color: '#999'
                         }
                     },
-                    series: {
-                        name: 'price',
-                        type: 'line',
-                        data: [],
-                        markLine: {
-                            silent: true,
+                    series: [
+                        {
+                            name: 'price',
+                            type: 'line',
+                            data: [],
+                            showSymbol: false,
+                            markLine: {
+                                silent: true,
+                                lineStyle: {
+                                    color: '#333'
+                                },
+                                data: [
+                                    {
+                                        yAxis: 300
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            name: 'trend',
+                            type: 'line',
+                            data: [],
+                            showSymbol: false,
+                            smooth: true,
                             lineStyle: {
-                                color: '#333'
-                            },
-                            data: [
-                                {
-                                    yAxis: 300
-                                }
-                            ]
+                                width: 2,
+                                type: 'dashed'
+                            }
                         }
-                    }
+                    ]
                 },
                 query: (callback) => {
                     return fetch(`./api/month`).then((data) => {
@@ -1394,7 +1553,7 @@ ${containerHtml}
                     if (!Array.isArray(data) || data.length === 0) {
                         return {
                             xAxis: { data: [] },
-                            series: { data: [] }
+                            series: [{ data: [] }, { data: [] }]
                         }
                     }
                     const values = data.map(function (item) {
@@ -1408,7 +1567,15 @@ ${containerHtml}
                     const bottomBase = Math.round((minValue + gap) * 100) / 100;
                     const topBase = Math.round((maxValue - gap) * 100) / 100;
 
+                    const trendInfo = buildNormalizedTrendForRows(data);
+                    const trendValues = trendInfo ? trendInfo.trendValues : [];
+
                     return {
+                        title: trendInfo ? {
+                            text: 'last month price',
+                            subtext: trendInfo.model.equationText,
+                            left: '1%'
+                        } : undefined,
                         yAxis: {
                             min: Math.floor((minValue - 1) / 10) * 10,
                         },
@@ -1435,19 +1602,24 @@ ${containerHtml}
                                 }
                             ]
                         },
-                        series: {
-                            data: values,
-                            markLine: {
-                                data: [
-                                    {
-                                        yAxis: bottomBase
-                                    },
-                                    {
-                                        yAxis: topBase
-                                    },
-                                ]
+                        series: [
+                            {
+                                data: values,
+                                markLine: {
+                                    data: [
+                                        {
+                                            yAxis: bottomBase
+                                        },
+                                        {
+                                            yAxis: topBase
+                                        },
+                                    ]
+                                }
+                            },
+                            {
+                                data: trendValues
                             }
-                        }
+                        ]
                     }
                 }
 
@@ -1464,9 +1636,10 @@ ${containerHtml}
                         trigger: 'axis'
                     },
                     grid: {
-                        left: '5%',
+                        left: 48,
                         right: '15%',
-                        bottom: '10%'
+                        bottom: '10%',
+                        containLabel: true
                     },
                     xAxis: {
                         data: []
@@ -1624,9 +1797,10 @@ ${containerHtml}
                         trigger: 'axis'
                     },
                     grid: {
-                        left: '5%',
+                        left: 48,
                         right: '15%',
-                        bottom: '10%'
+                        bottom: '10%',
+                        containLabel: true
                     },
                     xAxis: {
                         data: []
@@ -1659,22 +1833,36 @@ ${containerHtml}
                             color: '#999'
                         }
                     },
-                    series: {
-                        name: 'price',
-                        type: 'line',
-                        data: [],
-                        markLine: {
-                            silent: true,
+                    series: [
+                        {
+                            name: 'price',
+                            type: 'line',
+                            data: [],
+                            showSymbol: false,
+                            markLine: {
+                                silent: true,
+                                lineStyle: {
+                                    color: '#333'
+                                },
+                                data: [
+                                    {
+                                        yAxis: 300
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            name: 'trend',
+                            type: 'line',
+                            data: [],
+                            showSymbol: false,
+                            smooth: true,
                             lineStyle: {
-                                color: '#333'
-                            },
-                            data: [
-                                {
-                                    yAxis: 300
-                                }
-                            ]
+                                width: 2,
+                                type: 'dashed'
+                            }
                         }
-                    }
+                    ]
                 },
                 query: (callback) => {
                     return fetch(`./api/today`).then((data) => {
@@ -1685,7 +1873,7 @@ ${containerHtml}
                     if (!Array.isArray(data) || data.length === 0) {
                         return {
                             xAxis: { data: [] },
-                            series: { data: [] }
+                            series: [{ data: [] }, { data: [] }]
                         }
                     }
                     const values = data.map(function (item) {
@@ -1699,7 +1887,15 @@ ${containerHtml}
                     const bottomBase = Math.round((maxValue - gap * 2) * 100) / 100;
                     const topBase = Math.round((maxValue - gap) * 100) / 100;
 
+                    const trendInfo = buildNormalizedTrendForRows(data);
+                    const trendValues = trendInfo ? trendInfo.trendValues : [];
+
                     return {
+                        title: trendInfo ? {
+                            text: 'today price',
+                            subtext: trendInfo.model.equationText,
+                            left: '1%'
+                        } : undefined,
                         yAxis: {
                             min: Math.floor((minValue - 1) / 10) * 10,
                         },
@@ -1726,19 +1922,24 @@ ${containerHtml}
                                 }
                             ]
                         },
-                        series: {
-                            data: values,
-                            markLine: {
-                                data: [
-                                    {
-                                        yAxis: bottomBase
-                                    },
-                                    {
-                                        yAxis: topBase
-                                    },
-                                ]
+                        series: [
+                            {
+                                data: values,
+                                markLine: {
+                                    data: [
+                                        {
+                                            yAxis: bottomBase
+                                        },
+                                        {
+                                            yAxis: topBase
+                                        },
+                                    ]
+                                }
+                            },
+                            {
+                                data: trendValues
                             }
-                        }
+                        ]
                     }
                 }
             }
