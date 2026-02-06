@@ -1,4 +1,4 @@
-import { getDb } from './sqlite.js';
+import { dbRun, persistDb, queueDbOp } from './sqlite.js';
 
 function normalizePoint(point) {
   if (!point || typeof point !== 'object') return null;
@@ -20,26 +20,34 @@ export function upsertGoldSeries({ range, payload }) {
   }
 
   const table = range === '1d' ? 'gold_1d' : 'gold_30d';
-  const db = getDb();
   const updatedAt = Date.now();
 
-  const stmt = db.prepare(
-    `INSERT INTO ${table} (date_time, price, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(date_time) DO UPDATE SET
-       price = excluded.price,
-       updated_at = excluded.updated_at`
-  );
-
-  const tx = db.transaction((points) => {
-    for (const p of points) {
-      const np = normalizePoint(p);
-      if (!np) continue;
-      stmt.run(np.dateTime, np.price, updatedAt);
+  return queueDbOp(() => {
+    dbRun('BEGIN');
+    try {
+      for (const p of payload) {
+        const np = normalizePoint(p);
+        if (!np) continue;
+        dbRun(
+          `INSERT INTO ${table} (date_time, price, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(date_time) DO UPDATE SET
+             price = excluded.price,
+             updated_at = excluded.updated_at`,
+          [np.dateTime, np.price, updatedAt]
+        );
+      }
+      dbRun('COMMIT');
+      persistDb();
+    } catch (e) {
+      try {
+        dbRun('ROLLBACK');
+      } catch {
+        // ignore
+      }
+      throw e;
     }
+
+    return { upsertedAttempted: payload.length };
   });
-
-  tx(payload);
-
-  return { upsertedAttempted: payload.length };
 }

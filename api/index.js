@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as dataAPI from "./dataAPI.js";
 import query from "./query.js";
 import { upsertGoldSeries } from "../db/goldSeries.js";
+import { readGoldSeries } from "../db/goldRead.js";
 
 
 const router = Router();
@@ -32,7 +33,7 @@ router.get("/today", async (req, res) => {
     } = result;
     if (status === 200) {
         try {
-            upsertGoldSeries({
+            await upsertGoldSeries({
                 range: "1d",
                 payload: data,
             });
@@ -53,7 +54,7 @@ router.get("/month", async (req, res) => {
     } = result;
     if (status === 200) {
         try {
-            upsertGoldSeries({
+            await upsertGoldSeries({
                 range: "30d",
                 payload: data,
             });
@@ -63,6 +64,16 @@ router.get("/month", async (req, res) => {
         res.json(data);
     } else {
         res.status(status).send(result.message);
+    }
+});
+
+// Read-only: returns already saved 30d series from sqlite.
+router.get("/month_saved", async (req, res) => {
+    try {
+        const rows = await readGoldSeries("30d");
+        res.json(rows);
+    } catch (e) {
+        res.status(500).send(e?.message || "DB error");
     }
 });
 

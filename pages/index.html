@@ -4,8 +4,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>echarts</title>
+        <title>实时金价</title>
     <style>
+        :root {
+            --bg: #f6f7fb;
+            --card: #ffffff;
+            --border: rgba(15, 23, 42, 0.10);
+            --shadow: 0 6px 24px rgba(15, 23, 42, 0.08);
+            --text: #0f172a;
+            --muted: rgba(15, 23, 42, 0.62);
+            --buy: #16a34a;
+            --sell: #ef4444;
+            --link: #2563eb;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -13,78 +25,652 @@
         }
 
         html,
-        body,
-        #container {
+        body {
             height: 100%;
         }
 
-        #container {
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+        }
+
+        .toolbar {
+            position: fixed;
+            left: 12px;
+            top: 12px;
+            z-index: 9999;
             display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .toolbar button {
+            appearance: none;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(6px);
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 12px;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+        }
+
+        .toolbar button:hover {
+            background: #f6f6f6;
+        }
+
+        #container {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(420px, 1fr));
+            align-items: stretch;
+            overflow-y: auto;
+            padding: 56px 16px 16px;
+            gap: 12px;
+            height: 100%;
+            min-height: 100vh;
+        }
+
+        /* 小屏回退为单列 */
+        @media (max-width: 980px) {
+            #container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 打印前预排版（仅屏幕态生效）：将页面内容宽度临时收敛到 A4 可打印宽度，便于图表重绘 */
+        @media screen {
+            body.print-prep #container {
+                width: var(--print-content-width, 703px);
+                max-width: var(--print-content-width, 703px);
+                margin-left: auto;
+                margin-right: auto;
+            }
+        }
+
+        .print-header {
+            display: none;
+            width: 100%;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
+            grid-column: 1 / -1;
+        }
+
+        .print-header .print-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .print-header .print-meta {
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--muted);
         }
 
         .item {
-            width: calc(100% - 30%);
-            height: 50%;
-            overflow: hidden;
+            width: 100%;
+            height: 520px;
+            min-height: 420px;
+            overflow: visible;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: var(--shadow);
         }
 
         .summary {
             flex: none;
-            width: 30%;
-            height: 50%;
-            background-color: #fef8ef;
+            width: 100%;
+            height: auto;
+            min-height: 520px;
+            background: linear-gradient(180deg, #fff7ed 0%, #ffffff 70%);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: var(--shadow);
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            justify-content: flex-start;
+            align-items: stretch;
+            padding: 14px 14px;
             line-height: 24px;
             font-size: 16px;
-            color: #999;
+            color: var(--muted);
         }
 
-        .summary .tit {}
+        .summary p {
+            width: 100%;
+        }
 
-        .summary .now {}
+        .summary .tit {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            text-align: left;
+            letter-spacing: 0.2px;
+        }
 
-        .summary .mm {}
+        .summary .now {
+            margin-top: 8px;
+            font-size: 18px;
+            color: rgba(15, 23, 42, 0.75);
+        }
 
-        .summary .cs {}
+        .summary .now b {
+            color: var(--text);
+        }
 
-        .summary .t {}
+        .summary .mm,
+        .summary .cs,
+        .summary .t,
+        .summary .bs {
+            font-size: 12px;
+        }
+
         .summary .actions {
             margin-top: 6px;
             font-size: 12px;
+            text-align: right;
         }
         .summary .refresh {
             cursor: pointer;
             text-decoration: underline;
+            color: var(--link);
         }
         .summary .bs .b{
-            color: #4aff2e;
+            color: var(--buy);
         }
         .summary .bs .s{
-            color: #fa364f;
+            color: var(--sell);
+        }
+
+        .summary .rec {
+            margin-top: 6px;
+            line-height: 22px;
+            color: rgba(15, 23, 42, 0.75);
+            text-align: center;
+            padding: 0 10px;
+        }
+        .summary .rec .rec-p{
+            display: inline-block;
+            margin-left: 8px;
+        }
+        .summary .rec2{
+            font-size: 12px;
+            color: var(--muted);
+            padding: 0 10px;
+            text-align: center;
+            word-break: break-all;
+        }
+
+        .summary .rec3{
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--muted);
+            padding: 0 10px;
+            text-align: center;
+            word-break: break-all;
+            line-height: 18px;
+        }
+
+        .summary .risk {
+            width: 100%;
+            padding: 0 16px;
+            margin-top: 8px;
+            box-sizing: border-box;
+        }
+
+        .summary .risk .risk-tit {
+            font-size: 13px;
+            color: rgba(15, 23, 42, 0.75);
+            margin-bottom: 4px;
+        }
+
+        .summary .risk .risk-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .summary .risk input[type="range"] {
+            flex: 1;
+        }
+
+        .summary .risk .risk-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
         }
 
         .today {
             flex: none;
             width: 100%;
-            height: 50%;
+            height: 520px;
+            min-height: 420px;
+            overflow: visible;
+        }
+
+        .history {
+            flex: none;
+            width: 100%;
+            height: 520px;
+            min-height: 420px;
+            overflow: visible;
+        }
+
+        @media print {
+            @page {
+                /* 跟随浏览器/打印机选择的纸张尺寸，避免宽度过大或缩放不足 */
+                size: auto;
+                margin: 12mm;
+            }
+
+            .toolbar {
+                display: none !important;
+            }
+
+            html,
+            body {
+                height: auto;
+            }
+
+            body {
+                margin: 0;
+                background: #fff;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                overflow-x: hidden;
+            }
+
+            /* 只打印 container */
+            body * {
+                visibility: hidden;
+            }
+
+            #container,
+            #container * {
+                visibility: visible;
+            }
+
+            #container {
+                position: static;
+                left: 0;
+                top: 0;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
+                display: block;
+                padding: 0;
+                gap: 0;
+            }
+
+            /* 打印时强制占满可打印宽度（避免被屏幕态 print-prep 约束影响） */
+            body.print-prep #container {
+                width: 100% !important;
+                max-width: 100% !important;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+            }
+
+            .print-header {
+                display: block;
+                border-radius: 0;
+                box-shadow: none;
+                margin: 0;
+                max-width: 100% !important;
+                background: #fff;
+                border: 1px solid #e5e7eb;
+                padding: 10mm;
+                box-sizing: border-box;
+            }
+
+            .print-header .print-title {
+                font-size: 20px;
+            }
+
+            .print-header .print-meta {
+                font-size: 12px;
+                color: rgba(15, 23, 42, 0.62);
+            }
+
+            .summary,
+            .item,
+            .today,
+            .history {
+                max-width: 100% !important;
+                border-radius: 0;
+                box-shadow: none;
+                border: 1px solid #e5e7eb;
+                page-break-inside: avoid;
+                break-inside: avoid;
+                margin: 0;
+            }
+
+            /* 模块间无空隙：相邻模块共享边框，避免叠加 */
+            #container > :not(:first-child) {
+                border-top: 0;
+            }
+
+            #container > :last-child {
+                margin-bottom: 0;
+            }
+
+            /* 打印时按竖向排版，避免挤在一页 */
+            .summary,
+            .item,
+            .today,
+            .history {
+                width: 100% !important;
+                height: auto !important;
+                min-height: 0;
+            }
+
+            .summary {
+                padding: 10mm;
+            }
+
+            .item,
+            .today,
+            .history {
+                height: 160mm;
+            }
         }
     </style>
 
 </head>
 
 <body>
+    <div class="toolbar">
+        <button id="btnExportPdf" type="button">导出PDF(打印)</button>
+    </div>
     <div id="container">
+        <div class="print-header">
+            <div class="print-title">黄金数据报告</div>
+            <div class="print-meta">更新时间：<span id="printTime"></span></div>
+        </div>
     </div>
     <script src="./static/dayjs.min.js"></script>
     <script src="./static/echarts.min.js"></script>
     <script src="./static/vintage.js"></script>
     <script>
+                function updatePrintHeaderTime() {
+                    const el = document.getElementById('printTime');
+                    if (!el) return;
+                    const pageUpdate = (typeof window !== 'undefined') ? window.__pageUpdateTimeText : '';
+                    if (pageUpdate) {
+                        el.textContent = pageUpdate;
+                        return;
+                    }
+                    try {
+                        el.textContent = dayjs().format('YYYY-MM-DD HH:mm:ss');
+                    } catch {
+                        el.textContent = String(new Date());
+                    }
+                }
+
+                function mmToPx(mm) {
+                    // 以 96 DPI 近似换算：px = mm * 96 / 25.4
+                    return (Number(mm) * 96) / 25.4;
+                }
+
+                function getA4ContentWidthPx() {
+                    // A4 宽 210mm；@page margin 12mm * 2 => 内容区约 186mm
+                    const a4WidthMm = 210;
+                    const marginMm = 12 * 2;
+                    const contentMm = Math.max(120, a4WidthMm - marginMm);
+                    return Math.floor(mmToPx(contentMm));
+                }
+
+                function applyA4WidthPrintPrep() {
+                    const px = getA4ContentWidthPx();
+                    try {
+                        document.documentElement.style.setProperty('--print-content-width', `${px}px`);
+                        document.body.classList.add('print-prep');
+                    } catch {
+                        // ignore
+                    }
+                }
+
+                function clearPrintPrep() {
+                    try {
+                        document.body.classList.remove('print-prep');
+                        document.documentElement.style.removeProperty('--print-content-width');
+                    } catch {
+                        // ignore
+                    }
+                }
+
+                function resizeAllCharts() {
+                    try {
+                        window.dispatchEvent(new Event('resize'));
+                    } catch {
+                        // ignore
+                    }
+                    try {
+                        const chats = Array.isArray(window.__chats) ? window.__chats : [];
+                        for (const c of chats) {
+                            if (c && c.chart && typeof c.chart.resize === 'function') {
+                                c.chart.resize();
+                            }
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+
+                function nextFrame() {
+                    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+                }
+
+                function sleep(ms) {
+                    return new Promise((resolve) => setTimeout(resolve, ms));
+                }
+
+                async function prepareA4AndPrint() {
+                    updatePrintHeaderTime();
+                    applyA4WidthPrintPrep();
+
+                    // 等待布局生效后再 resize 图表，避免打印时画布宽度不对
+                    await nextFrame();
+                    await nextFrame();
+                    resizeAllCharts();
+                    await nextFrame();
+
+                    // 最后再调用打印：给图表重绘留时间
+                    await sleep(800);
+                    window.print();
+                }
+
+                function getChartSnapshots(a4ContentWidthPx) {
+                    // 通过“离屏重绘”生成图片，避免修改当前页面布局（无感知）。
+                    const snaps = new Map();
+                    const chats = Array.isArray(window.__chats) ? window.__chats : [];
+                    if (!window.echarts || chats.length === 0) return snaps;
+
+                    const stage = document.createElement('div');
+                    stage.style.position = 'fixed';
+                    stage.style.left = '-10000px';
+                    stage.style.top = '0';
+                    stage.style.width = `${a4ContentWidthPx}px`;
+                    stage.style.visibility = 'hidden';
+                    stage.style.pointerEvents = 'none';
+                    stage.style.zIndex = '-1';
+                    document.body.appendChild(stage);
+
+                    try {
+                        for (const c of chats) {
+                            try {
+                                if (!c || !c.chart || typeof c.chart.getOption !== 'function') continue;
+                                const id = c.printChartId;
+                                if (!id) continue;
+
+                                const rect = (c.dom && typeof c.dom.getBoundingClientRect === 'function')
+                                    ? c.dom.getBoundingClientRect()
+                                    : { width: 0, height: 0 };
+                                const oldW = rect.width || (c.dom && c.dom.clientWidth) || a4ContentWidthPx;
+                                const oldH = rect.height || (c.dom && c.dom.clientHeight) || 520;
+                                const ratio = oldW ? (a4ContentWidthPx / oldW) : 1;
+                                const newH = Math.max(320, Math.min(1400, Math.round(oldH * ratio)));
+
+                                const holder = document.createElement('div');
+                                holder.style.width = `${a4ContentWidthPx}px`;
+                                holder.style.height = `${newH}px`;
+                                stage.appendChild(holder);
+
+                                const stageChart = echarts.init(holder, 'vintage', {
+                                    renderer: 'canvas',
+                                    useDirtyRect: false
+                                });
+
+                                const opt = c.chart.getOption();
+                                if (opt) {
+                                    stageChart.setOption(opt, { notMerge: true, lazyUpdate: false });
+                                }
+                                stageChart.resize({ width: a4ContentWidthPx, height: newH });
+
+                                const dataUrl = stageChart.getDataURL({
+                                    type: 'png',
+                                    pixelRatio: 2,
+                                    backgroundColor: '#fff'
+                                });
+                                if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+                                    snaps.set(String(id), dataUrl);
+                                }
+
+                                stageChart.dispose();
+                                holder.remove();
+                            } catch {
+                                // ignore single chart failure
+                            }
+                        }
+                    } finally {
+                        stage.remove();
+                    }
+
+                    return snaps;
+                }
+
+                function buildPrintHtml(containerHtml, a4ContentWidthPx) {
+                    const css = `
+                        :root { --w: ${a4ContentWidthPx}px; }
+                        * { box-sizing: border-box; }
+                        html, body { margin: 0; padding: 0; }
+                        body {
+                            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans";
+                            color: #0f172a;
+                            background: #fff;
+                            -webkit-print-color-adjust: exact;
+                            print-color-adjust: exact;
+                        }
+                        @page { size: auto; margin: 12mm; }
+                        #container { width: 100%; max-width: 100%; padding: 0; margin: 0; }
+                        #container > * { width: 100%; max-width: 100%; border: 1px solid #e5e7eb; border-top: 0; }
+                        #container > :first-child { border-top: 1px solid #e5e7eb; }
+                        .print-header { padding: 10mm; }
+                        .print-title { font-size: 20px; font-weight: 700; }
+                        .print-meta { margin-top: 4px; font-size: 12px; color: rgba(15,23,42,0.62); }
+                        .summary { padding: 10mm; }
+                        /* 图表图片占满模块宽度 */
+                        .print-chart-img { display: block; width: 100%; height: auto; }
+                        /* 防止图片被拆页 */
+                        .item, .today, .history, .summary { break-inside: avoid; page-break-inside: avoid; }
+                    `;
+
+                    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>print</title>
+<style>${css}</style>
+</head>
+<body>
+${containerHtml}
+</body>
+</html>`;
+                }
+
+                async function printContainerViaIframe() {
+                    updatePrintHeaderTime();
+
+                    // 1) 采集图表快照（离屏重绘，不影响当前页面）
+                    const a4Px = getA4ContentWidthPx();
+                    const snapshots = getChartSnapshots(a4Px);
+
+                    // 2) 克隆 container HTML
+                    const src = document.getElementById('container');
+                    if (!src) {
+                        return;
+                    }
+                    const clone = src.cloneNode(true);
+
+                    // 把图表容器替换为图片，确保 iframe 中也能完整展示
+                    const chartHolders = clone.querySelectorAll('[data-print-chart-id]');
+                    for (const holder of chartHolders) {
+                        const id = holder.getAttribute('data-print-chart-id');
+                        const url = snapshots.get(String(id));
+                        if (!url) continue;
+                        holder.innerHTML = '';
+                        const img = clone.ownerDocument.createElement('img');
+                        img.className = 'print-chart-img';
+                        img.src = url;
+                        img.alt = 'chart';
+                        holder.appendChild(img);
+                    }
+
+                    const html = buildPrintHtml(clone.outerHTML, a4Px);
+
+                    // 4) 写入隐藏 iframe 并打印
+                    const iframe = document.createElement('iframe');
+                    iframe.style.position = 'fixed';
+                    iframe.style.right = '0';
+                    iframe.style.bottom = '0';
+                    iframe.style.width = '0';
+                    iframe.style.height = '0';
+                    iframe.style.border = '0';
+                    iframe.style.opacity = '0';
+                    iframe.setAttribute('aria-hidden', 'true');
+                    document.body.appendChild(iframe);
+
+                    const doc = iframe.contentDocument;
+                    const win = iframe.contentWindow;
+                    if (!doc || !win) {
+                        iframe.remove();
+                        return;
+                    }
+                    doc.open();
+                    doc.write(html);
+                    doc.close();
+
+                    // 等 iframe 渲染完成后再 print
+                    await sleep(300);
+                    try {
+                        win.focus();
+                        win.print();
+                    } catch {
+                        // ignore
+                    }
+
+                    // 清理与恢复
+                    await sleep(300);
+                    iframe.remove();
+                }
+
+                function exportContainerToPdf() {
+                    // 通过浏览器“打印 -> 另存为 PDF”实现。
+                    // 打印前触发一次 resize，提升 ECharts 画布导出效果。
+                    // 优先使用 iframe 方案：只打印 #container，且图表以图片形式确保完整。
+                    printContainerViaIframe().catch(() => {
+                        // fallback
+                        prepareA4AndPrint();
+                    });
+                }
         class Chat {
             chat = null;
             dom = null;
@@ -112,6 +698,13 @@
             initChat() {
                 this.dom = document.createElement('div');
                 this.dom.className = this.config.class;
+                try {
+                    const seq = (window.__printChartSeq = (window.__printChartSeq || 0) + 1);
+                    this.printChartId = `c${seq}`;
+                    this.dom.setAttribute('data-print-chart-id', this.printChartId);
+                } catch {
+                    // ignore
+                }
                 this.config.container.appendChild(this.dom);
                 this.chart = echarts.init(this.dom, 'vintage', {
                     renderer: 'canvas',
@@ -157,10 +750,405 @@
         }
 
 
+        function fitBestPolynomialTrend(points, maxDegree = 3) {
+            const rows = (points || []).filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+            if (rows.length < 3) {
+                return null;
+            }
+
+            const xs = rows.map(r => r.x);
+            const ys = rows.map(r => r.y);
+            const xMin = Math.min(...xs);
+            const xMax = Math.max(...xs);
+            const yMin = Math.min(...ys);
+            const yMax = Math.max(...ys);
+
+            const xRange = xMax - xMin || 1;
+            const yRange = yMax - yMin || 1;
+
+            // Normalize to [-1, 1] and [0, 1] to improve conditioning
+            const nx = xs.map(x => ((x - xMin) / xRange) * 2 - 1);
+            const ny = ys.map(y => (y - yMin) / yRange);
+
+            function solveLinearSystem(A, b) {
+                // Gaussian elimination with partial pivoting
+                const n = b.length;
+                const M = A.map((row, i) => row.slice().concat([b[i]]));
+                for (let k = 0; k < n; k++) {
+                    // pivot
+                    let pivotRow = k;
+                    let pivotVal = Math.abs(M[k][k]);
+                    for (let i = k + 1; i < n; i++) {
+                        const v = Math.abs(M[i][k]);
+                        if (v > pivotVal) { pivotVal = v; pivotRow = i; }
+                    }
+                    if (pivotVal < 1e-12) return null;
+                    if (pivotRow !== k) {
+                        const tmp = M[k];
+                        M[k] = M[pivotRow];
+                        M[pivotRow] = tmp;
+                    }
+                    // normalize pivot row
+                    const pivot = M[k][k];
+                    for (let j = k; j <= n; j++) M[k][j] /= pivot;
+                    // eliminate
+                    for (let i = 0; i < n; i++) {
+                        if (i === k) continue;
+                        const factor = M[i][k];
+                        if (Math.abs(factor) < 1e-12) continue;
+                        for (let j = k; j <= n; j++) {
+                            M[i][j] -= factor * M[k][j];
+                        }
+                    }
+                }
+                return M.map(row => row[n]);
+            }
+
+            function polyFit(deg) {
+                const m = deg + 1;
+                const XtX = Array.from({ length: m }, () => Array(m).fill(0));
+                const Xty = Array(m).fill(0);
+                const lambda = 1e-6; // tiny ridge for stability
+
+                for (let i = 0; i < nx.length; i++) {
+                    const x = nx[i];
+                    const y = ny[i];
+                    const powers = Array(m).fill(1);
+                    for (let p = 1; p < m; p++) powers[p] = powers[p - 1] * x;
+
+                    for (let r = 0; r < m; r++) {
+                        Xty[r] += powers[r] * y;
+                        for (let c = 0; c < m; c++) {
+                            XtX[r][c] += powers[r] * powers[c];
+                        }
+                    }
+                }
+
+                for (let i = 0; i < m; i++) XtX[i][i] += lambda;
+                const coeff = solveLinearSystem(XtX, Xty);
+                if (!coeff) return null;
+
+                function predictNorm(xNorm) {
+                    let s = 0;
+                    let xp = 1;
+                    for (let i = 0; i < coeff.length; i++) {
+                        s += coeff[i] * xp;
+                        xp *= xNorm;
+                    }
+                    return s;
+                }
+
+                let mse = 0;
+                for (let i = 0; i < nx.length; i++) {
+                    const err = predictNorm(nx[i]) - ny[i];
+                    mse += err * err;
+                }
+                mse /= nx.length;
+
+                return { deg, coeff, mse, predictNorm };
+            }
+
+            let best = null;
+            const maxD = Math.max(1, Math.min(maxDegree, 6));
+            for (let d = 1; d <= maxD; d++) {
+                const model = polyFit(d);
+                if (!model) continue;
+                // penalty to avoid overfitting: small cost per degree
+                const score = model.mse + d * 0.0005;
+                if (!best || score < best.score) {
+                    best = { ...model, score };
+                }
+            }
+            if (!best) return null;
+
+            function predict(x) {
+                const xNorm = ((x - xMin) / xRange) * 2 - 1;
+                const yNorm = best.predictNorm(xNorm);
+                return yMin + yNorm * yRange;
+            }
+
+            function equationText() {
+                // yNorm = a0 + a1 x + a2 x^2 ... (on normalized x)
+                const parts = best.coeff.map((a, i) => {
+                    const v = Math.round(a * 10000) / 10000;
+                    if (i === 0) return `${v}`;
+                    if (i === 1) return `${v}x`;
+                    return `${v}x^${i}`;
+                });
+                return `deg=${best.deg}, yNorm=${parts.join(' + ')}`;
+            }
+
+            return {
+                degree: best.deg,
+                mse: best.mse,
+                predict,
+                equationText: equationText(),
+            };
+        }
+
+
+        function fitBestTrendModel(points) {
+            const rows = (points || []).filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+            if (rows.length < 5) return null;
+
+            const xs = rows.map(r => r.x);
+            const ys = rows.map(r => r.y);
+            const xMin = Math.min(...xs);
+            const xMax = Math.max(...xs);
+            const yMin = Math.min(...ys);
+            const yMax = Math.max(...ys);
+
+            const xRange = xMax - xMin || 1;
+            const yRange = yMax - yMin || 1;
+
+            // Normalize x to [0,1], y to [0,1]
+            const nx = xs.map(x => (x - xMin) / xRange);
+            const ny = ys.map(y => (y - yMin) / yRange);
+
+            function solveLinearSystem(A, b) {
+                const n = b.length;
+                const M = A.map((row, i) => row.slice().concat([b[i]]));
+                for (let k = 0; k < n; k++) {
+                    let pivotRow = k;
+                    let pivotVal = Math.abs(M[k][k]);
+                    for (let i = k + 1; i < n; i++) {
+                        const v = Math.abs(M[i][k]);
+                        if (v > pivotVal) { pivotVal = v; pivotRow = i; }
+                    }
+                    if (pivotVal < 1e-12) return null;
+                    if (pivotRow !== k) {
+                        const tmp = M[k];
+                        M[k] = M[pivotRow];
+                        M[pivotRow] = tmp;
+                    }
+                    const pivot = M[k][k];
+                    for (let j = k; j <= n; j++) M[k][j] /= pivot;
+                    for (let i = 0; i < n; i++) {
+                        if (i === k) continue;
+                        const factor = M[i][k];
+                        if (Math.abs(factor) < 1e-12) continue;
+                        for (let j = k; j <= n; j++) M[i][j] -= factor * M[k][j];
+                    }
+                }
+                return M.map(row => row[n]);
+            }
+
+            function fitLinearModel(featureFn, name) {
+                const X = nx.map(x => featureFn(x));
+                const m = X[0]?.length || 0;
+                if (!m) return null;
+
+                const XtX = Array.from({ length: m }, () => Array(m).fill(0));
+                const Xty = Array(m).fill(0);
+                const lambda = 1e-6;
+
+                for (let i = 0; i < X.length; i++) {
+                    const xi = X[i];
+                    const yi = ny[i];
+                    for (let r = 0; r < m; r++) {
+                        Xty[r] += xi[r] * yi;
+                        for (let c = 0; c < m; c++) {
+                            XtX[r][c] += xi[r] * xi[c];
+                        }
+                    }
+                }
+                for (let i = 0; i < m; i++) XtX[i][i] += lambda;
+
+                const coeff = solveLinearSystem(XtX, Xty);
+                if (!coeff) return null;
+
+                function predictNorm(x) {
+                    const f = featureFn(x);
+                    let s = 0;
+                    for (let i = 0; i < coeff.length; i++) s += coeff[i] * f[i];
+                    return s;
+                }
+
+                let mse = 0;
+                for (let i = 0; i < nx.length; i++) {
+                    const err = predictNorm(nx[i]) - ny[i];
+                    mse += err * err;
+                }
+                mse /= nx.length;
+
+                const penalty = 0.0008 * m;
+                const score = mse + penalty;
+
+                return { name, coeff, mse, score, predictNorm };
+            }
+
+            const candidates = [];
+
+            // Polynomial (degree 1..3) in x
+            for (let deg = 1; deg <= 3; deg++) {
+                candidates.push(
+                    fitLinearModel(
+                        (x) => {
+                            const f = [1];
+                            let p = 1;
+                            for (let i = 1; i <= deg; i++) { p *= x; f.push(p); }
+                            return f;
+                        },
+                        `poly${deg}`
+                    )
+                );
+            }
+
+            // Piecewise linear (linear spline) with one knot at 0.5: y = a + b x + c max(0, x-0.5)
+            candidates.push(
+                fitLinearModel(
+                    (x) => [1, x, Math.max(0, x - 0.5)],
+                    'hinge1'
+                )
+            );
+
+            // Two-knot hinge spline
+            candidates.push(
+                fitLinearModel(
+                    (x) => [1, x, Math.max(0, x - 1 / 3), Math.max(0, x - 2 / 3)],
+                    'hinge2'
+                )
+            );
+
+            // Log trend (safe on [0,1])
+            candidates.push(
+                fitLinearModel(
+                    (x) => [1, Math.log1p(x)],
+                    'log1p'
+                )
+            );
+
+            // Exponential-ish trend via basis exp(kx)
+            candidates.push(
+                fitLinearModel(
+                    (x) => [1, Math.exp(x)],
+                    'exp'
+                )
+            );
+
+            const models = candidates.filter(Boolean);
+            if (models.length === 0) return null;
+            models.sort((a, b) => a.score - b.score);
+            const best = models[0];
+
+            function predict(x) {
+                const xNorm = (x - xMin) / xRange;
+                const yNorm = best.predictNorm(xNorm);
+                return yMin + yNorm * yRange;
+            }
+
+            function equationText() {
+                const coeff = best.coeff.map((v) => Math.round(v * 10000) / 10000);
+                return `${best.name} mse=${(Math.round(best.mse * 1e6) / 1e6)} coeff=[${coeff.join(', ')}]`;
+            }
+
+            return {
+                name: best.name,
+                mse: best.mse,
+                predict,
+                equationText: equationText(),
+            };
+        }
+
+
+        function toNumber(v) {
+            const n = Number(String(v ?? '').replace(/,/g, ''));
+            return Number.isFinite(n) ? n : NaN;
+        }
+
+        function clamp(v, lo, hi) {
+            return Math.max(lo, Math.min(hi, v));
+        }
+
+        function riskToK(riskValue) {
+            // 0(保守) -> k=2.0 ；100(激进) -> k=0.6
+            const v = clamp(Number(riskValue), 0, 100);
+            const kMax = 2.0;
+            const kMin = 0.6;
+            const k = kMax - (kMax - kMin) * (v / 100);
+            return Math.round(k * 100) / 100;
+        }
+
+        function computeSuggestionContext({ history30d, currentPrice }) {
+            if (!Array.isArray(history30d) || history30d.length < 20) return null;
+            if (!Number.isFinite(currentPrice)) return null;
+
+            const points = history30d
+                .map(p => ({ x: toNumber(p.date_time), y: toNumber(p.price) }))
+                .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+            if (points.length < 20) return null;
+
+            const model = fitBestTrendModel(points) || fitBestPolynomialTrend(points, 3);
+            if (!model || typeof model.predict !== 'function') return null;
+
+            const xs = points.map(p => p.x);
+            const xMin = Math.min(...xs);
+            const xMax = Math.max(...xs);
+            const xNow = clamp(Date.now(), xMin, xMax);
+            const trendNow = model.predict(xNow);
+            if (!Number.isFinite(trendNow)) return null;
+
+            let sum = 0;
+            let sum2 = 0;
+            let n = 0;
+            for (const p of points) {
+                const t = model.predict(p.x);
+                if (!Number.isFinite(t)) continue;
+                const r = p.y - t;
+                sum += r;
+                sum2 += r * r;
+                n++;
+            }
+            if (n < 10) return null;
+            const mean = sum / n;
+            const variance = Math.max(0, sum2 / n - mean * mean);
+            const std = Math.sqrt(variance) || 0;
+
+            return {
+                trendNow,
+                std,
+                modelText: model.equationText || model.name || 'trend',
+                currentPrice,
+            };
+        }
+
+        function computeBuySellSuggestionFromContext(ctx, riskValue) {
+            if (!ctx) return null;
+            const k = riskToK(riskValue);
+            const buy = ctx.trendNow - k * ctx.std;
+            const sell = ctx.trendNow + k * ctx.std;
+
+            let action = '观望';
+            if (ctx.currentPrice <= buy) action = '偏买入';
+            else if (ctx.currentPrice >= sell) action = '偏卖出';
+
+            const fmt = (x) => {
+                const v = Math.round(x * 100) / 100;
+                return Number.isFinite(v) ? v.toFixed(2) : '-';
+            };
+
+            return {
+                buy: fmt(buy),
+                sell: fmt(sell),
+                action,
+                model: ctx.modelText,
+                note: `基于历史残差σ=${fmt(ctx.std)}，k=${k}`,
+                risk: clamp(Number(riskValue), 0, 100),
+                k,
+                trendNow: fmt(ctx.trendNow),
+                currentPrice: fmt(ctx.currentPrice)
+            };
+        }
+
+
         class Summary {
             config = null;
             dom = null;
             onClick = null;
+            onInput = null;
+            risk = 50;
+            suggestionCtx = null;
+            lastSummary = null;
             colums = {
                 now: '实时',
                 max: '最高',
@@ -180,6 +1168,13 @@
                 this.dom.className = this.config.class;
                 this.config.container.appendChild(this.dom);
 
+                try {
+                    const saved = Number(localStorage.getItem('riskLevel'));
+                    if (Number.isFinite(saved)) this.risk = clamp(saved, 0, 100);
+                } catch {
+                    // ignore
+                }
+
                 this.onClick = (e) => {
                     const target = e.target;
                     if (target && target.classList && target.classList.contains('refresh')) {
@@ -188,11 +1183,35 @@
                 }
                 this.dom.addEventListener('click', this.onClick);
 
+                this.onInput = (e) => {
+                    const target = e.target;
+                    if (target && target.classList && target.classList.contains('risk-range')) {
+                        const v = Number(target.value);
+                        if (Number.isFinite(v)) {
+                            this.risk = clamp(v, 0, 100);
+                            try {
+                                localStorage.setItem('riskLevel', String(this.risk));
+                            } catch {
+                                // ignore
+                            }
+                            // Re-render using cached context
+                            const suggestion = computeBuySellSuggestionFromContext(this.suggestionCtx, this.risk);
+                            if (this.lastSummary) {
+                                this.render({ ...this.lastSummary, suggestion });
+                            }
+                        }
+                    }
+                };
+                this.dom.addEventListener('input', this.onInput);
+
                 this.query();
             }
             dispose() {
                 if (this.onClick) {
                     this.dom.removeEventListener('click', this.onClick);
+                }
+                if (this.onInput) {
+                    this.dom.removeEventListener('input', this.onInput);
                 }
                 this.dom.remove();
             }
@@ -206,7 +1225,11 @@
                 this.setLoading(true);
                 return Promise.resolve(
                     this.config.query((data) => {
-                        this.render(data);
+                        // Cache context for slider updates
+                        this.suggestionCtx = data.__ctx || null;
+                        this.lastSummary = data;
+                        const suggestion = computeBuySellSuggestionFromContext(this.suggestionCtx, this.risk);
+                        this.render({ ...data, suggestion });
                     })
                 )
                     .catch((err) => {
@@ -215,9 +1238,27 @@
                     });
             }
             render(data) {
-                this.dom.innerHTML = this.renderPart(data.autd);
+                // 将页面展示的“更新时间”同步到打印头部（导出/菜单打印都复用）
+                try {
+                    if (data && data.date && data.time) {
+                        window.__pageUpdateTimeText = `${data.date} ${data.time}`;
+                        updatePrintHeaderTime();
+                        updateDocumentTitle();
+                    }
+                } catch {
+                    // ignore
+                }
+                this.dom.innerHTML = this.renderPart(data.autd, data.suggestion);
             }
-            renderPart(data) {
+            function updateDocumentTitle() {
+                try {
+                    const pageUpdate = (typeof window !== 'undefined') ? window.__pageUpdateTimeText : '';
+                    document.title = pageUpdate ? `实时金价-${pageUpdate}` : '实时金价';
+                } catch {
+                    // ignore
+                }
+            }
+            renderPart(data, suggestion) {
                 return `
                 <p class="tit">${data.title}</p>
                 <p class="actions"><span class="refresh">刷新</span></p>
@@ -235,6 +1276,30 @@
                     <span>买入区间: <b class="b">■</b></span> 
                     <span>卖出区间: <b class="s">■</b></span>
                 </p>
+                <div class="risk">
+                    <div class="risk-tit">风险偏好：<b>${(suggestion && Number.isFinite(suggestion.risk)) ? suggestion.risk : this.risk}</b></div>
+                    <div class="risk-row">
+                        <span style="font-size:12px;color:#999;">保守</span>
+                        <input class="risk-range" type="range" min="0" max="100" value="${(suggestion && Number.isFinite(suggestion.risk)) ? suggestion.risk : this.risk}" />
+                        <span style="font-size:12px;color:#999;">激进</span>
+                    </div>
+                    <div class="risk-labels">
+                        <span>信号更少/更稳</span>
+                        <span>信号更频繁</span>
+                    </div>
+                </div>
+                ${suggestion ? `
+                <p class="rec">
+                    建议: <b>${suggestion.action}</b>
+                    <span class="rec-p">买入点: <b class="b">${suggestion.buy}</b></span>
+                    <span class="rec-p">卖出点: <b class="s">${suggestion.sell}</b></span>
+                </p>
+                <p class="rec2">趋势函数: ${suggestion.model}（${suggestion.note}）</p>
+                <p class="rec3">
+                    判定规则：若实时价 ≤ 买入点 → 偏买入；若实时价 ≥ 卖出点 → 偏卖出；否则观望。
+                    当前实时价=${suggestion.currentPrice}，趋势值=${suggestion.trendNow}。
+                </p>
+                ` : ``}
                 `
             }
         }
@@ -245,10 +1310,14 @@
                 ViewChat: Summary,
                 class: 'summary',
                 query: (callback) => {
-                    return fetch(`./api/summary`).then((data) => {
-                        return data.json()
-                    }).then((data) => {
-                        callback(data)
+                    return Promise.all([
+                        fetch(`./api/summary`).then((r) => r.json()),
+                        fetch(`./api/month_saved`).then((r) => r.json()).catch(() => [])
+                    ]).then(([summary, saved30d]) => {
+                        const currentPrice = toNumber(summary?.autd?.now);
+                        // Cache context for slider updates.
+                        const ctx = computeSuggestionContext({ history30d: saved30d, currentPrice });
+                        callback({ ...summary, __ctx: ctx });
                     })
                 }
             },
@@ -385,6 +1454,166 @@
             },
             {
                 ViewChat: Chat,
+                class: 'history item',
+                options: {
+                    title: {
+                        text: '历史(已保存30天)',
+                        left: '1%'
+                    },
+                    tooltip: {
+                        trigger: 'axis'
+                    },
+                    grid: {
+                        left: '5%',
+                        right: '15%',
+                        bottom: '10%'
+                    },
+                    xAxis: {
+                        data: []
+                    },
+                    yAxis: {},
+                    toolbox: {
+                        right: 10,
+                        feature: {
+                            dataZoom: {
+                                yAxisIndex: 'none'
+                            },
+                            restore: {},
+                            saveAsImage: {}
+                        }
+                    },
+                    visualMap: {
+                        top: 50,
+                        right: 10,
+                        pieces: [
+                            {
+                                lte: 300,
+                                color: '#AA069F'
+                            },
+                            {
+                                gt: 300,
+                                color: '#AC3B2A'
+                            }
+                        ],
+                        outOfRange: {
+                            color: '#999'
+                        }
+                    },
+                    series: [
+                        {
+                            name: 'price',
+                            type: 'line',
+                            data: [],
+                            showSymbol: false,
+                            markLine: {
+                                silent: true,
+                                lineStyle: {
+                                    color: '#333'
+                                },
+                                data: [
+                                    {
+                                        yAxis: 300
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            name: 'trend',
+                            type: 'line',
+                            data: [],
+                            showSymbol: false,
+                            smooth: true,
+                            lineStyle: {
+                                width: 2,
+                                type: 'dashed'
+                            }
+                        }
+                    ]
+                },
+                query: (callback) => {
+                    return fetch(`./api/month_saved`).then((data) => {
+                        return data.json()
+                    }).then(callback)
+                },
+                getOptions: (data) => {
+                    if (!Array.isArray(data) || data.length === 0) {
+                        return {
+                            xAxis: { data: [] },
+                            series: [{ data: [] }, { data: [] }]
+                        }
+                    }
+                    const values = data.map(function (item) {
+                        return item.price;
+                    });
+                    const maxValue = Math.max(...values);
+                    const minValue = Math.min(...values);
+                    const gapValue = Math.ceil((maxValue - minValue) * 100) / 100;
+                    const gap = Math.ceil((gapValue / 5) * 100) / 100;
+                    const bottomBase = Math.round((minValue + gap) * 100) / 100;
+                    const topBase = Math.round((maxValue - gap) * 100) / 100;
+
+                    const points = data.map(function (item) {
+                        return { x: item.date_time, y: item.price };
+                    });
+                    const model = fitBestTrendModel(points) || fitBestPolynomialTrend(points, 3);
+                    const trendValues = model ? data.map(function (item) {
+                        return model.predict(item.date_time);
+                    }) : [];
+
+                    return {
+                        yAxis: {
+                            min: Math.floor((minValue - 1) / 10) * 10,
+                        },
+                        xAxis: {
+                            data: data.map(function (item) {
+                                return dayjs(item.date_time).format('MM-DD HH:mm');
+                            }),
+                        },
+                        title: model ? {
+                            text: '历史趋势',
+                            subtext: model.equationText,
+                            left: '1%'
+                        } : undefined,
+                        visualMap: {
+                            pieces: [
+                                {
+                                    lte: bottomBase,
+                                    color: '#4aff2e'
+                                },
+                                {
+                                    gt: bottomBase,
+                                    lte: topBase,
+                                    color: '#af792a'
+                                },
+                                {
+                                    gt: topBase,
+                                    color: '#fa364f'
+                                }
+                            ]
+                        },
+                        series: [
+                            {
+                                data: values,
+                                markLine: {
+                                    data: [
+                                        {
+                                            yAxis: bottomBase
+                                        },
+                                        {
+                                            yAxis: topBase
+                                        },
+                                    ]
+                                }
+                            },
+                            {
+                                data: trendValues
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                ViewChat: Chat,
                 class: 'today item',
                 options: {
                     title: {
@@ -518,12 +1747,33 @@
         window.onload = function () {
             // hq_str_gds_AUTD
             const $container = document.getElementById('container')
+            window.__chats = [];
+            updatePrintHeaderTime();
             config.map(config => {
                 const chat = new config.ViewChat({
                     ...config,
                     container: $container
                 });
+                window.__chats.push(chat);
             })
+
+            const btn = document.getElementById('btnExportPdf');
+            if (btn) {
+                btn.addEventListener('click', exportContainerToPdf);
+            }
+
+            // 支持直接用浏览器菜单打印时，也能更新时间并 resize。
+            window.addEventListener('beforeprint', () => {
+                updatePrintHeaderTime();
+                // 让打印样式先应用，再触发 resize，避免图表宽度不占满
+                setTimeout(() => {
+                    resizeAllCharts();
+                }, 50);
+            });
+
+            window.addEventListener('afterprint', () => {
+                resizeAllCharts();
+            });
         }
     </script>
 </body>
