@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>自动化模拟-近24小时</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: #f7f8fb;
+      color: #0f172a;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 12px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+    }
+
+    .toolbar .title {
+      font-weight: 700;
+      margin-right: 8px;
+    }
+
+    .field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+
+    .field label {
+      font-size: 12px;
+      color: rgba(15, 23, 42, 0.68);
+      white-space: nowrap;
+    }
+
+    .field input[type="number"] {
+      width: 100px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #fff;
+      outline: none;
+    }
+
+    .field input[type="range"] {
+      width: 160px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      background: #2563eb;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.secondary {
+      background: #0f172a;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      padding: 10px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #eef2f7;
+    }
+    .metric .k {
+      font-size: 12px;
+      color: rgba(15, 23, 42, 0.62);
+    }
+    .metric .v {
+      font-weight: 800;
+      font-size: 16px;
+      margin-top: 2px;
+    }
+
+    #equityChart {
+      width: 100%;
+      height: 420px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #eef2f7;
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+
+    th {
+      font-size: 12px;
+      color: rgba(15, 23, 42, 0.62);
+      font-weight: 700;
+      background: #fbfbfd;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .muted { color: rgba(15, 23, 42, 0.62); }
+    .danger { color: #dc2626; font-weight: 700; }
+    .ok { color: #16a34a; font-weight: 700; }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(15, 23, 42, 0.62);
+      line-height: 1.5;
+    }
+
+    @media (max-width: 860px) {
+      .metrics { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+      .field input[type="range"] { width: 140px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toolbar">
+    <span class="title">自动化模拟（近24小时，基于保存的 gold_1d）</span>
+
+    <div class="field">
+      <label>起始资金</label>
+      <input id="startCash" type="number" value="10000" min="0" step="100" />
+    </div>
+
+    <div class="field">
+      <label>风险偏好</label>
+      <input id="risk" type="range" min="0" max="100" value="50" />
+      <span id="riskText" class="muted">50</span>
+    </div>
+
+    <div class="field">
+      <label>最小间隔(交易min)</label>
+      <input id="minInterval" type="number" value="30" min="1" step="1" />
+    </div>
+
+    <div class="field">
+      <label>买入比例(%)</label>
+      <input id="buyPct" type="number" value="20" min="0" max="100" step="1" />
+    </div>
+
+    <div class="field">
+      <label>卖出比例(%)</label>
+      <input id="sellPct" type="number" value="20" min="0" max="100" step="1" />
+    </div>
+
+    <div class="field">
+      <label>推断买卖量</label>
+      <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input id="autoSize" type="checkbox" checked />
+        自动（比例随信号强弱变化）
+      </label>
+    </div>
+
+    <button id="btnRun" type="button">运行模拟</button>
+    <button id="btnBack" class="secondary" type="button">返回主页</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="metrics" id="metrics"></div>
+      <div class="hint">
+        规则说明：
+        1) 使用保存的 <span class="muted">gold_1d</span> 近24小时数据逐点回放；每个时间点都会计算建议与权益。
+           最小间隔(min)指“两次实际成交之间的最小时间间隔”：只有当距离上一次成交≥最小间隔时，才允许触发下一笔交易。
+        2) 建议判定：若 当前价 ≤ 买入点 → 偏买入；若 当前价 ≥ 卖出点 → 偏卖出；否则观望。
+        3) 买入价 = 当前价；卖出价 = 当前价 - 3（固定），用于模拟“卖出打折/滑点”。
+        4) 每次买入=剩余现金的 X%（买入金额）；每次卖出=当前持仓的 Y%（卖出单位）。
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="font-weight:800;">gold_1d 可视化（近24小时）</div>
+        <div class="muted" id="rowsMeta"></div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+          <label class="muted" style="display:flex;align-items:center;gap:6px;">
+            <input id="rowsNormalize" type="checkbox" />
+            归一化(0-1)
+          </label>
+          <span class="muted">显示最近</span>
+          <select id="rowsLimit" style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;background:#fff;">
+            <option value="200">200条</option>
+            <option value="500" selected>500条</option>
+            <option value="1000">1000条</option>
+            <option value="0">全部</option>
+          </select>
+        </div>
+      </div>
+      <div id="gold1dChart" style="width:100%;height:340px;"></div>
+    </div>
+
+    <div class="card">
+      <div id="equityChart"></div>
+    </div>
+
+    <div class="card" style="max-height: 460px; overflow: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>动作</th>
+            <th>建议</th>
+            <th>价格</th>
+            <th>成交价</th>
+            <th>比例</th>
+            <th>金额(按占比)</th>
+            <th>现金</th>
+            <th>持仓(单位)</th>
+            <th>权益</th>
+          </tr>
+        </thead>
+        <tbody id="trades"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="./static/dayjs.min.js"></script>
+  <script src="./static/echarts.min.js"></script>
+  <script src="./static/vintage.js"></script>
+
+  <script>
+    function toNumber(v) {
+      const n = Number(String(v ?? '').replace(/,/g, ''));
+      return Number.isFinite(n) ? n : NaN;
+    }
+    function clamp(v, lo, hi) {
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    function normalizeGold1dRows(rows) {
+      // 基于 gold_1d 自身的 min/max 做归一化：pNorm = (p - min) / (max - min)
+      if (!Array.isArray(rows) || rows.length === 0) return null;
+      const ys = rows.map(r => toNumber(r?.price)).filter(Number.isFinite);
+      if (ys.length === 0) return null;
+      const yMin = Math.min(...ys);
+      const yMax = Math.max(...ys);
+      const yRange = (yMax - yMin) || 1;
+      const normalized = rows.map(r => {
+        const p = toNumber(r?.price);
+        const pNorm = Number.isFinite(p) ? (p - yMin) / yRange : NaN;
+        return { ...r, price_norm: pNorm };
+      });
+      return { normalized, yMin, yMax, yRange };
+    }
+
+    function riskToK(riskValue) {
+      // 0(保守) -> k=2.0 ；100(激进) -> k=0.6
+      const v = clamp(Number(riskValue), 0, 100);
+      const kMax = 2.0;
+      const kMin = 0.6;
+      const k = kMax - (kMax - kMin) * (v / 100);
+      return Math.round(k * 100) / 100;
+    }
+
+    function fitBestPolynomialTrend(points, maxDegree = 3) {
+      const rows = (points || []).filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (rows.length < 3) return null;
+
+      const xs = rows.map(r => r.x);
+      const ys = rows.map(r => r.y);
+      const xMin = Math.min(...xs);
+      const xMax = Math.max(...xs);
+      const yMin = Math.min(...ys);
+      const yMax = Math.max(...ys);
+
+      const xRange = xMax - xMin || 1;
+      const yRange = yMax - yMin || 1;
+
+      const nx = xs.map(x => ((x - xMin) / xRange) * 2 - 1);
+      const ny = ys.map(y => (y - yMin) / yRange);
+
+      function solveLinearSystem(A, b) {
+        const n = b.length;
+        const M = A.map((row, i) => row.slice().concat([b[i]]));
+        for (let k = 0; k < n; k++) {
+          let pivotRow = k;
+          let pivotVal = Math.abs(M[k][k]);
+          for (let i = k + 1; i < n; i++) {
+            const v = Math.abs(M[i][k]);
+            if (v > pivotVal) { pivotVal = v; pivotRow = i; }
+          }
+          if (pivotVal < 1e-12) return null;
+          if (pivotRow !== k) {
+            const tmp = M[k];
+            M[k] = M[pivotRow];
+            M[pivotRow] = tmp;
+          }
+          const pivot = M[k][k];
+          for (let j = k; j <= n; j++) M[k][j] /= pivot;
+          for (let i = 0; i < n; i++) {
+            if (i === k) continue;
+            const factor = M[i][k];
+            if (Math.abs(factor) < 1e-12) continue;
+            for (let j = k; j <= n; j++) {
+              M[i][j] -= factor * M[k][j];
+            }
+          }
+        }
+        return M.map(row => row[n]);
+      }
+
+      function polyFit(deg) {
+        const m = deg + 1;
+        const XtX = Array.from({ length: m }, () => Array(m).fill(0));
+        const Xty = Array(m).fill(0);
+        const lambda = 1e-6;
+
+        for (let i = 0; i < nx.length; i++) {
+          const x = nx[i];
+          const y = ny[i];
+          const powers = Array(m).fill(1);
+          for (let p = 1; p < m; p++) powers[p] = powers[p - 1] * x;
+
+          for (let r = 0; r < m; r++) {
+            Xty[r] += powers[r] * y;
+            for (let c = 0; c < m; c++) {
+              XtX[r][c] += powers[r] * powers[c];
+            }
+          }
+        }
+
+        for (let i = 0; i < m; i++) XtX[i][i] += lambda;
+        const coeff = solveLinearSystem(XtX, Xty);
+        if (!coeff) return null;
+
+        function predictNorm(xNorm) {
+          let s = 0;
+          let xp = 1;
+          for (let i = 0; i < coeff.length; i++) {
+            s += coeff[i] * xp;
+            xp *= xNorm;
+          }
+          return s;
+        }
+
+        let mse = 0;
+        for (let i = 0; i < nx.length; i++) {
+          const err = predictNorm(nx[i]) - ny[i];
+          mse += err * err;
+        }
+        mse /= nx.length;
+
+        return { deg, coeff, mse, predictNorm };
+      }
+
+      let best = null;
+      const maxD = Math.max(1, Math.min(maxDegree, 6));
+      for (let d = 1; d <= maxD; d++) {
+        const model = polyFit(d);
+        if (!model) continue;
+        const score = model.mse + d * 0.0005;
+        if (!best || score < best.score) {
+          best = { ...model, score };
+        }
+      }
+      if (!best) return null;
+
+      function predict(x) {
+        const xNorm = ((x - xMin) / xRange) * 2 - 1;
+        const yNorm = best.predictNorm(xNorm);
+        return yMin + yNorm * yRange;
+      }
+
+      function equationText() {
+        const parts = best.coeff.map((a, i) => {
+          const v = Math.round(a * 10000) / 10000;
+          if (i === 0) return `${v}`;
+          if (i === 1) return `${v}x`;
+          return `${v}x^${i}`;
+        });
+        return `deg=${best.deg}, yNorm=${parts.join(' + ')}`;
+      }
+
+      return { degree: best.deg, mse: best.mse, predict, equationText: equationText() };
+    }
+
+    function fitBestTrendModel(points) {
+      const rows = (points || []).filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (rows.length < 5) return null;
+
+      const xs = rows.map(r => r.x);
+      const ys = rows.map(r => r.y);
+      const xMin = Math.min(...xs);
+      const xMax = Math.max(...xs);
+      const yMin = Math.min(...ys);
+      const yMax = Math.max(...ys);
+
+      const xRange = xMax - xMin || 1;
+      const yRange = yMax - yMin || 1;
+
+      const nx = xs.map(x => (x - xMin) / xRange);
+      const ny = ys.map(y => (y - yMin) / yRange);
+
+      function solveLinearSystem(A, b) {
+        const n = b.length;
+        const M = A.map((row, i) => row.slice().concat([b[i]]));
+        for (let k = 0; k < n; k++) {
+          let pivotRow = k;
+          let pivotVal = Math.abs(M[k][k]);
+          for (let i = k + 1; i < n; i++) {
+            const v = Math.abs(M[i][k]);
+            if (v > pivotVal) { pivotVal = v; pivotRow = i; }
+          }
+          if (pivotVal < 1e-12) return null;
+          if (pivotRow !== k) {
+            const tmp = M[k];
+            M[k] = M[pivotRow];
+            M[pivotRow] = tmp;
+          }
+          const pivot = M[k][k];
+          for (let j = k; j <= n; j++) M[k][j] /= pivot;
+          for (let i = 0; i < n; i++) {
+            if (i === k) continue;
+            const factor = M[i][k];
+            if (Math.abs(factor) < 1e-12) continue;
+            for (let j = k; j <= n; j++) M[i][j] -= factor * M[k][j];
+          }
+        }
+        return M.map(row => row[n]);
+      }
+
+      function fitLinearModel(featureFn, name) {
+        const X = nx.map(x => featureFn(x));
+        const m = X[0]?.length || 0;
+        if (!m) return null;
+
+        const XtX = Array.from({ length: m }, () => Array(m).fill(0));
+        const Xty = Array(m).fill(0);
+        const lambda = 1e-6;
+
+        for (let i = 0; i < X.length; i++) {
+          const xi = X[i];
+          const yi = ny[i];
+          for (let r = 0; r < m; r++) {
+            Xty[r] += xi[r] * yi;
+            for (let c = 0; c < m; c++) XtX[r][c] += xi[r] * xi[c];
+          }
+        }
+        for (let i = 0; i < m; i++) XtX[i][i] += lambda;
+
+        const coeff = solveLinearSystem(XtX, Xty);
+        if (!coeff) return null;
+
+        function predictNorm(x) {
+          const f = featureFn(x);
+          let s = 0;
+          for (let i = 0; i < coeff.length; i++) s += coeff[i] * f[i];
+          return s;
+        }
+
+        let mse = 0;
+        for (let i = 0; i < nx.length; i++) {
+          const err = predictNorm(nx[i]) - ny[i];
+          mse += err * err;
+        }
+        mse /= nx.length;
+
+        const penalty = 0.0008 * m;
+        const score = mse + penalty;
+        return { name, coeff, mse, score, predictNorm };
+      }
+
+      const candidates = [];
+      for (let deg = 1; deg <= 3; deg++) {
+        candidates.push(
+          fitLinearModel(
+            (x) => {
+              const f = [1];
+              let p = 1;
+              for (let i = 1; i <= deg; i++) { p *= x; f.push(p); }
+              return f;
+            },
+            `poly${deg}`
+          )
+        );
+      }
+      candidates.push(fitLinearModel((x) => [1, x, Math.max(0, x - 0.5)], 'hinge1'));
+      candidates.push(fitLinearModel((x) => [1, x, Math.max(0, x - 1 / 3), Math.max(0, x - 2 / 3)], 'hinge2'));
+      candidates.push(fitLinearModel((x) => [1, Math.log1p(x)], 'log1p'));
+      candidates.push(fitLinearModel((x) => [1, Math.exp(x)], 'exp'));
+
+      const models = candidates.filter(Boolean);
+      if (models.length === 0) return null;
+      models.sort((a, b) => a.score - b.score);
+      const best = models[0];
+
+      function predict(x) {
+        const xNorm = (x - xMin) / xRange;
+        const yNorm = best.predictNorm(xNorm);
+        return yMin + yNorm * yRange;
+      }
+
+      function equationText() {
+        const coeff = best.coeff.map((v) => Math.round(v * 10000) / 10000);
+        return `${best.name} mse=${(Math.round(best.mse * 1e6) / 1e6)} coeff=[${coeff.join(', ')}]`;
+      }
+
+      return { name: best.name, mse: best.mse, predict, equationText: equationText() };
+    }
+
+    function computeGold1dNormalizedContext({ rows, currentPrice, minPoints = 12 }) {
+      // 显式使用 gold_1d 数据的 min/max 做归一化（0..1），在归一化空间计算 buy/sell，再映射回价格。
+      if (!Array.isArray(rows) || rows.length < minPoints) return null;
+      if (!Number.isFinite(currentPrice)) return null;
+
+      const points = rows
+        .map(p => ({ x: toNumber(p?.date_time), y: toNumber(p?.price) }))
+        .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (points.length < minPoints) return null;
+
+      const ys = points.map(p => p.y);
+      const yMin = Math.min(...ys);
+      const yMax = Math.max(...ys);
+      const yRange = (yMax - yMin) || 1;
+
+      const model = fitBestTrendModel(points) || fitBestPolynomialTrend(points, 3);
+      if (!model || typeof model.predict !== 'function') return null;
+
+      const lastX = points[points.length - 1]?.x;
+      const xNow = Number.isFinite(lastX) ? lastX : Date.now();
+      const trendNow = model.predict(xNow);
+      if (!Number.isFinite(trendNow)) return null;
+
+      let sum = 0;
+      let sum2 = 0;
+      let n = 0;
+      for (const p of points) {
+        const t = model.predict(p.x);
+        if (!Number.isFinite(t)) continue;
+        const r = p.y - t;
+        sum += r;
+        sum2 += r * r;
+        n++;
+      }
+      if (n < Math.min(10, minPoints)) return null;
+      const mean = sum / n;
+      const variance = Math.max(0, sum2 / n - mean * mean);
+      const std = Math.sqrt(variance) || 0;
+
+      const trendNowNorm = (trendNow - yMin) / yRange;
+      const stdNorm = std / yRange;
+      const currentNorm = (currentPrice - yMin) / yRange;
+
+      return {
+        yMin,
+        yMax,
+        yRange,
+        trendNow,
+        std,
+        trendNowNorm,
+        stdNorm,
+        currentPrice,
+        currentNorm,
+        modelText: model.equationText || model.name || 'trend',
+      };
+    }
+
+    function computeBuySellSuggestionFromGold1dNormalizedContext(ctx, riskValue) {
+      if (!ctx) return null;
+      const k = riskToK(riskValue);
+      const buyNorm = ctx.trendNowNorm - k * ctx.stdNorm;
+      const sellNorm = ctx.trendNowNorm + k * ctx.stdNorm;
+
+      const buy = ctx.yMin + buyNorm * ctx.yRange;
+      const sell = ctx.yMin + sellNorm * ctx.yRange;
+
+      let action = '观望';
+      if (ctx.currentPrice <= buy) action = '偏买入';
+      else if (ctx.currentPrice >= sell) action = '偏卖出';
+
+      const fmt = (x) => {
+        const v = Math.round(x * 100) / 100;
+        return Number.isFinite(v) ? v.toFixed(2) : '-';
+      };
+
+      return {
+        buy: fmt(buy),
+        sell: fmt(sell),
+        buyRaw: buy,
+        sellRaw: sell,
+        action,
+        model: ctx.modelText,
+        note: `norm(基于gold_1d min/max), σ=${fmt(ctx.std)}(stdNorm=${fmt(ctx.stdNorm)}), k=${k}`,
+        risk: clamp(Number(riskValue), 0, 100),
+        k,
+        stdRaw: ctx.std,
+        trendNow: fmt(ctx.trendNow),
+        currentPrice: fmt(ctx.currentPrice)
+      };
+    }
+
+    function inferTradeSizingFromSuggestion({ side, currentPrice, buyRaw, sellRaw, stdRaw, k, maxFraction }) {
+      // 推断建议买卖信号的强弱，并据此动态调整买卖比例。
+      // 1) 计算 z = delta / (k*σ)
+      // 2) strength = 1 - exp(-clamp(z,0,3))，范围 [0,1]
+      // 3) fraction = maxFraction * strength
+      const maxF = clamp(Number(maxFraction), 0, 1);
+      if (maxF <= 0) return { fraction: 0, strength: 0, z: 0 };
+
+      const cp = Number(currentPrice);
+      const buy = Number(buyRaw);
+      const sell = Number(sellRaw);
+      const std = Math.max(0, Number(stdRaw));
+      const kk = Math.max(0.01, Number(k));
+      const denom = Math.max(1e-6, kk * (std || 0));
+
+      let z = 0;
+      if (side === 'BUY') {
+        if (!Number.isFinite(cp) || !Number.isFinite(buy)) return { fraction: 0, strength: 0, z: 0 };
+        if (cp > buy) return { fraction: 0, strength: 0, z: 0 };
+        z = (buy - cp) / denom;
+      } else if (side === 'SELL') {
+        if (!Number.isFinite(cp) || !Number.isFinite(sell)) return { fraction: 0, strength: 0, z: 0 };
+        if (cp < sell) return { fraction: 0, strength: 0, z: 0 };
+        z = (cp - sell) / denom;
+      } else {
+        return { fraction: 0, strength: 0, z: 0 };
+      }
+
+      const zClamped = clamp(z, 0, 3);
+      const strength = clamp(1 - Math.exp(-zClamped), 0, 1);
+      const fraction = clamp(maxF * strength, 0, maxF);
+      return { fraction, strength, z: zClamped };
+    }
+
+    function computeBuySellSuggestionFromContext(ctx, riskValue) {
+      if (!ctx) return null;
+      const k = riskToK(riskValue);
+      const buy = ctx.trendNow - k * ctx.std;
+      const sell = ctx.trendNow + k * ctx.std;
+
+      let action = '观望';
+      if (ctx.currentPrice <= buy) action = '偏买入';
+      else if (ctx.currentPrice >= sell) action = '偏卖出';
+
+      const fmt = (x) => {
+        const v = Math.round(x * 100) / 100;
+        return Number.isFinite(v) ? v.toFixed(2) : '-';
+      };
+
+      return {
+        buy: fmt(buy),
+        sell: fmt(sell),
+        action,
+        model: ctx.modelText,
+        note: `σ=${fmt(ctx.std)}, k=${k}`,
+        risk: clamp(Number(riskValue), 0, 100),
+        k,
+        trendNow: fmt(ctx.trendNow),
+        currentPrice: fmt(ctx.currentPrice)
+      };
+    }
+
+    function fmtMoney(x) {
+      const v = Math.round(Number(x) * 100) / 100;
+      if (!Number.isFinite(v)) return '-';
+      return v.toFixed(2);
+    }
+
+    function buildDecisionIndices(rows, minIntervalMs) {
+      const idx = [];
+      if (!Array.isArray(rows) || rows.length === 0) return idx;
+      let last = -Infinity;
+      for (let i = 0; i < rows.length; i++) {
+        const t = toNumber(rows[i]?.date_time);
+        if (!Number.isFinite(t)) continue;
+        if (idx.length === 0 || (t - last) >= minIntervalMs) {
+          idx.push(i);
+          last = t;
+        }
+      }
+      if (idx[idx.length - 1] !== rows.length - 1) idx.push(rows.length - 1);
+      return idx;
+    }
+
+    function simulate(rows, params) {
+      const sellOffset = 3; // 固定：卖出价=当前价-3
+      const startCash = Math.max(0, toNumber(params.startCash));
+      const risk = clamp(toNumber(params.risk), 0, 100);
+      const minIntervalMin = Math.max(1, Math.floor(toNumber(params.minIntervalMin)));
+      const buyPct = clamp(toNumber(params.buyPct) / 100, 0, 1);
+      const sellPct = clamp(toNumber(params.sellPct) / 100, 0, 1);
+      const autoSize = !!params.autoSize;
+
+      const lookbackWindowMs = 24 * 60 * 60 * 1000; // 仅使用“该时间点之前24小时”作为参考窗口
+
+      const minIntervalMs = minIntervalMin * 60 * 1000;
+      const canTradeAt = (t, lastT) => (t - lastT) >= minIntervalMs;
+
+      // 滑动窗口起点：保证每个决策点只用 [t-24h, t] 的数据，不使用未来，也不使用更早数据。
+      let windowStart = 0;
+
+      let cash = startCash;
+      let position = 0;
+      let lastTradeTime = -Infinity;
+
+      const trades = [];
+      const equitySeries = [];
+      const priceSeries = [];
+      const timeSeries = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const t = toNumber(row?.date_time);
+        const price = toNumber(row?.price);
+        if (!Number.isFinite(t) || !Number.isFinite(price)) continue;
+
+        // 将窗口起点推进到 t-24h 之后（注意不能超过当前 i）
+        const windowFloor = t - lookbackWindowMs;
+        while (windowStart < i) {
+          const tt = toNumber(rows[windowStart]?.date_time);
+          if (!Number.isFinite(tt) || tt < windowFloor) {
+            windowStart++;
+            continue;
+          }
+          break;
+        }
+
+        const windowRows = rows.slice(windowStart, i + 1);
+        const ctx = computeGold1dNormalizedContext({ rows: windowRows, currentPrice: price, minPoints: 12 });
+        const sug = computeBuySellSuggestionFromGold1dNormalizedContext(ctx, risk);
+
+        let executed = null;
+        if (sug && canTradeAt(t, lastTradeTime)) {
+          if (sug.action === '偏买入' && cash > 0 && buyPct > 0) {
+            const sizing = autoSize
+              ? inferTradeSizingFromSuggestion({
+                  side: 'BUY',
+                  currentPrice: price,
+                  buyRaw: sug.buyRaw,
+                  sellRaw: sug.sellRaw,
+                  stdRaw: sug.stdRaw,
+                  k: sug.k,
+                  maxFraction: buyPct,
+                })
+              : { fraction: buyPct, strength: 1, z: 0 };
+
+            const frac = sizing.fraction;
+
+            const spend = cash * frac;
+            const buyPrice = price;
+            const qty = buyPrice > 0 ? (spend / buyPrice) : 0;
+            if (qty > 0) {
+              cash -= spend;
+              position += qty;
+              lastTradeTime = t;
+              executed = { side: 'BUY', execPrice: buyPrice, qty, frac, amount: spend, strength: sizing.strength, z: sizing.z };
+            }
+          } else if (sug.action === '偏卖出' && position > 0 && sellPct > 0) {
+            const sizing = autoSize
+              ? inferTradeSizingFromSuggestion({
+                  side: 'SELL',
+                  currentPrice: price,
+                  buyRaw: sug.buyRaw,
+                  sellRaw: sug.sellRaw,
+                  stdRaw: sug.stdRaw,
+                  k: sug.k,
+                  maxFraction: sellPct,
+                })
+              : { fraction: sellPct, strength: 1, z: 0 };
+
+            const frac = sizing.fraction;
+
+            const qty = position * frac;
+            const sellPrice = Math.max(0, price - sellOffset);
+            const proceeds = qty * sellPrice;
+            if (qty > 0 && sellPrice > 0) {
+              position -= qty;
+              cash += proceeds;
+              lastTradeTime = t;
+              executed = { side: 'SELL', execPrice: sellPrice, qty, frac, amount: proceeds, strength: sizing.strength, z: sizing.z };
+            }
+          }
+        }
+
+        const equity = cash + position * price;
+        const timeLabel = dayjs(t).format('MM-DD HH:mm');
+        timeSeries.push(timeLabel);
+        priceSeries.push(price);
+        equitySeries.push(equity);
+
+        if (executed) {
+          trades.push({
+            time: t,
+            timeLabel,
+            timeText: dayjs(t).format('YYYY-MM-DD HH:mm'),
+            side: executed.side,
+            suggest: sug?.action || '-',
+            price,
+            execPrice: executed.execPrice,
+            frac: executed.frac,
+            qty: executed.qty,
+            amount: executed.amount,
+            strength: executed.strength,
+            z: executed.z,
+            cash,
+            position,
+            equity,
+            buyPoint: sug?.buy,
+            sellPoint: sug?.sell,
+            model: sug?.model,
+          });
+        }
+      }
+
+      const lastPrice = priceSeries.length ? priceSeries[priceSeries.length - 1] : NaN;
+      const finalEquity = cash + position * (Number.isFinite(lastPrice) ? lastPrice : 0);
+      const profit = finalEquity - startCash;
+      const roi = startCash > 0 ? (profit / startCash) : 0;
+
+      return {
+        startCash,
+        risk,
+        minIntervalMin,
+        buyPct,
+        sellPct,
+        autoSize,
+        trades,
+        series: { timeSeries, priceSeries, equitySeries },
+        final: { cash, position, lastPrice, finalEquity, profit, roi }
+      };
+    }
+
+    let chart;
+    let gold1dChart;
+    function renderChart(series, trades) {
+      if (!window.echarts) return;
+      if (!chart) {
+        chart = echarts.init(document.getElementById('equityChart'), 'vintage', { renderer: 'canvas' });
+        window.addEventListener('resize', () => chart && chart.resize());
+      }
+
+      const buyDots = [];
+      const sellDots = [];
+      const items = Array.isArray(trades) ? trades : [];
+      for (const t of items) {
+        const label = t?.timeLabel;
+        const eq = toNumber(t?.equity);
+        if (!label || !Number.isFinite(eq)) continue;
+        const dot = {
+          value: [label, eq],
+          name: t?.side,
+          execPrice: t?.execPrice,
+          rawPrice: t?.price,
+          qty: t?.qty,
+          frac: t?.frac,
+          amount: t?.amount,
+          strength: t?.strength,
+          z: t?.z,
+          cash: t?.cash,
+          position: t?.position,
+        };
+        if (t?.side === 'BUY') buyDots.push(dot);
+        if (t?.side === 'SELL') sellDots.push(dot);
+      }
+
+      chart.setOption({
+        title: { text: '权益曲线 vs 价格(近24小时)', left: '1%' },
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['equity', 'price', 'BUY', 'SELL'], right: 10 },
+        grid: { left: 56, right: 40, top: 50, bottom: 40, containLabel: true },
+        xAxis: { type: 'category', data: series.timeSeries },
+        yAxis: [
+          { type: 'value', name: 'equity', scale: true },
+          { type: 'value', name: 'price', scale: true }
+        ],
+        series: [
+          { name: 'equity', type: 'line', data: series.equitySeries, showSymbol: false, smooth: true, lineStyle: { width: 2 } },
+          { name: 'price', type: 'line', yAxisIndex: 1, data: series.priceSeries, showSymbol: false, smooth: true, lineStyle: { width: 1, type: 'dashed' } },
+          {
+            name: 'BUY',
+            type: 'scatter',
+            data: buyDots,
+            symbolSize: 10,
+            itemStyle: { color: '#16a34a' },
+            tooltip: {
+              valueFormatter: () => '',
+            }
+          },
+          {
+            name: 'SELL',
+            type: 'scatter',
+            data: sellDots,
+            symbolSize: 10,
+            itemStyle: { color: '#dc2626' },
+            tooltip: {
+              valueFormatter: () => '',
+            }
+          }
+        ]
+      }, true);
+
+      // 自定义 tooltip：在 axis tooltip 下，叠加 BUY/SELL 详情
+      chart.setOption({
+        tooltip: {
+          trigger: 'axis',
+          formatter: (params) => {
+            const list = Array.isArray(params) ? params : [params];
+            const axisLabel = list[0]?.axisValueLabel || list[0]?.name || '';
+
+            let html = `${axisLabel}`;
+            const lineItems = list.filter(p => p && (p.seriesName === 'equity' || p.seriesName === 'price'));
+            for (const p of lineItems) {
+              const v = Number(p.value);
+              const text = Number.isFinite(v) ? (p.seriesName === 'equity' ? fmtMoney(v) : fmtMoney(v)) : '-';
+              html += `<br/>${p.marker}${p.seriesName}: <b>${text}</b>`;
+            }
+
+            const tradeItems = list.filter(p => p && (p.seriesName === 'BUY' || p.seriesName === 'SELL'));
+            for (const p of tradeItems) {
+              const d = p.data || {};
+              const exec = Number(d.execPrice);
+              const raw = Number(d.rawPrice);
+              const qty = Number(d.qty);
+              const amount = Number(d.amount);
+              const cash = Number(d.cash);
+              const frac = Number(d.frac);
+              const strength = Number(d.strength);
+              const z = Number(d.z);
+              const fracText = Number.isFinite(frac) ? `${Math.round(frac * 1000) / 10}%` : '-';
+              const strengthText = Number.isFinite(strength) ? (Math.round(strength * 1000) / 1000) : '-';
+              const zText = Number.isFinite(z) ? (Math.round(z * 1000) / 1000) : '-';
+              html += `<br/>${p.marker}${p.seriesName}: 成交价=<b>${Number.isFinite(exec) ? fmtMoney(exec) : '-'}</b> (当前价=${Number.isFinite(raw) ? fmtMoney(raw) : '-'})`;
+              html += `<br/>&nbsp;&nbsp;strength=<b>${strengthText}</b> z=<b>${zText}</b>`;
+              html += `<br/>&nbsp;&nbsp;比例(占比)=<b>${fracText}</b> 金额=<b>${Number.isFinite(amount) ? fmtMoney(amount) : '-'}</b> 单位=<b>${Number.isFinite(qty) ? fmtMoney(qty) : '-'}</b> 现金=<b>${Number.isFinite(cash) ? fmtMoney(cash) : '-'}</b>`;
+            }
+            return html;
+          }
+        }
+      });
+    }
+
+    function renderGold1dChart(rows) {
+      const meta = document.getElementById('rowsMeta');
+      const limitSel = document.getElementById('rowsLimit');
+      const normChk = document.getElementById('rowsNormalize');
+      const limit = clamp(toNumber(limitSel?.value), 0, 200000);
+      const useNorm = !!normChk?.checked;
+      const total = Array.isArray(rows) ? rows.length : 0;
+
+      if (!window.echarts) return;
+      if (!gold1dChart) {
+        gold1dChart = echarts.init(document.getElementById('gold1dChart'), 'vintage', { renderer: 'canvas' });
+        window.addEventListener('resize', () => gold1dChart && gold1dChart.resize());
+      }
+
+      if (!total) {
+        if (meta) meta.textContent = '无数据';
+        gold1dChart.setOption({
+          title: { text: 'gold_1d price', left: '1%' },
+          xAxis: { type: 'category', data: [] },
+          yAxis: { type: 'value' },
+          series: [{ type: 'line', data: [] }]
+        }, true);
+        return;
+      }
+
+      const shown = limit > 0 ? rows.slice(Math.max(0, total - limit)) : rows;
+      const normInfo = normalizeGold1dRows(shown);
+      const yMin = normInfo ? normInfo.yMin : NaN;
+      const yMax = normInfo ? normInfo.yMax : NaN;
+
+      const startT = toNumber(rows[0]?.date_time);
+      const endT = toNumber(rows[rows.length - 1]?.date_time);
+      if (meta) {
+        meta.textContent = `共${total}条，区间：${dayjs(startT).format('MM-DD HH:mm')} ~ ${dayjs(endT).format('MM-DD HH:mm')}，min=${fmtMoney(yMin)} max=${fmtMoney(yMax)}${useNorm ? '（当前显示归一化）' : ''}`;
+      }
+
+      const xLabels = shown.map(r => dayjs(toNumber(r?.date_time)).format('MM-DD HH:mm'));
+      const yDataPrice = shown.map(r => toNumber(r?.price));
+      const yDataNorm = normInfo ? normInfo.normalized.map(r => toNumber(r?.price_norm)) : [];
+
+      gold1dChart.setOption({
+        title: { text: useNorm ? 'gold_1d price + normalized' : 'gold_1d price', left: '1%' },
+        tooltip: {
+          trigger: 'axis',
+          formatter: (params) => {
+            const p = Array.isArray(params) ? params[0] : params;
+            const idx = Number(p?.dataIndex);
+            const safeIdx = Number.isFinite(idx) ? idx : 0;
+            const t = p?.axisValueLabel || p?.name || '';
+            const raw = yDataPrice[safeIdx];
+            const norm = yDataNorm[safeIdx];
+            const rawText = Number.isFinite(raw) ? fmtMoney(raw) : '-';
+            const normText = Number.isFinite(norm) ? Number(norm).toFixed(4) : '-';
+            return `${t}<br/>price: <b>${rawText}</b><br/>norm(0-1): <b>${normText}</b>`;
+          }
+        },
+        grid: { left: 56, right: 20, top: 50, bottom: 40, containLabel: true },
+        legend: useNorm ? { data: ['price_norm', 'price'], right: 10 } : undefined,
+        xAxis: {
+          type: 'category',
+          data: xLabels,
+          axisLabel: { hideOverlap: true }
+        },
+        yAxis: useNorm
+          ? [
+              { type: 'value', name: 'norm', scale: true, min: 0, max: 1 },
+              { type: 'value', name: 'price', scale: true }
+            ]
+          : { type: 'value', scale: true },
+        series: [
+          {
+            name: useNorm ? 'price_norm' : 'price',
+            type: 'line',
+            data: useNorm ? yDataNorm : yDataPrice,
+            showSymbol: false,
+            smooth: true,
+            lineStyle: { width: 2 }
+          },
+          ...(useNorm ? [{
+            name: 'price',
+            type: 'line',
+            yAxisIndex: 1,
+            data: yDataPrice,
+            showSymbol: false,
+            smooth: true,
+            lineStyle: { width: 1, type: 'dashed', opacity: 0.9 }
+          }] : [])
+        ]
+      }, true);
+    }
+
+    function renderTrades(trades) {
+      const tbody = document.getElementById('trades');
+      tbody.innerHTML = '';
+      if (!trades || trades.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="muted">无交易（可能是建议多数为观望，或间隔/比例设置较保守）</td></tr>`;
+        return;
+      }
+
+      for (const t of trades) {
+        const tr = document.createElement('tr');
+        const fracText = Number.isFinite(toNumber(t.frac)) ? `${Math.round(toNumber(t.frac) * 1000) / 10}%` : '-';
+        const strengthText = Number.isFinite(toNumber(t.strength)) ? (Math.round(toNumber(t.strength) * 1000) / 1000) : '-';
+        const amtText = Number.isFinite(toNumber(t.amount)) ? fmtMoney(toNumber(t.amount)) : '-';
+        tr.innerHTML = `
+          <td>${t.timeText}</td>
+          <td class="${t.side === 'BUY' ? 'ok' : 'danger'}">${t.side}</td>
+          <td>${t.suggest}<div class="muted" style="max-width:420px;white-space:normal;">${(t.buyPoint && t.sellPoint) ? `买入点=${t.buyPoint} 卖出点=${t.sellPoint}` : ''}</div></td>
+          <td>${fmtMoney(t.price)}</td>
+          <td>${fmtMoney(t.execPrice)}</td>
+          <td>${fracText}<div class="muted">strength=${strengthText}</div></td>
+          <td>${amtText}</td>
+          <td>${fmtMoney(t.cash)}</td>
+          <td>${fmtMoney(t.position)}</td>
+          <td>${fmtMoney(t.equity)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function renderMetrics(result) {
+      const el = document.getElementById('metrics');
+      const f = result.final;
+      const items = [
+        { k: '起始资金', v: fmtMoney(result.startCash) },
+        { k: '最终权益', v: fmtMoney(f.finalEquity) },
+        { k: '收益', v: `${fmtMoney(f.profit)} (${(f.roi * 100).toFixed(2)}%)` },
+        { k: '交易次数', v: String(result.trades.length) },
+        { k: '最终现金', v: fmtMoney(f.cash) },
+        { k: '最终持仓(单位)', v: fmtMoney(f.position) },
+        { k: '最后价格', v: fmtMoney(f.lastPrice) },
+        { k: '参数', v: `risk=${result.risk}, interval=${result.minIntervalMin}min, buyMax=${Math.round(result.buyPct*100)}%, sellMax=${Math.round(result.sellPct*100)}%, autoSize=${result.autoSize ? 'on' : 'off'}` },
+      ];
+      el.innerHTML = items.map(it => `
+        <div class="metric">
+          <div class="k">${it.k}</div>
+          <div class="v">${it.v}</div>
+        </div>
+      `).join('');
+    }
+
+    async function loadRows() {
+      const resp = await fetch('./api/day_saved?hours=24');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const rows = Array.isArray(data) ? data : [];
+      rows.sort((a, b) => toNumber(a?.date_time) - toNumber(b?.date_time));
+      return rows;
+    }
+
+
+    async function run() {
+      const btn = document.getElementById('btnRun');
+      btn.disabled = true;
+      btn.textContent = '模拟中...';
+      try {
+        const rows = await loadRows();
+        renderGold1dChart(rows);
+        if (!rows.length) {
+          renderMetrics({
+            startCash: toNumber(document.getElementById('startCash').value),
+            risk: toNumber(document.getElementById('risk').value),
+            minIntervalMin: toNumber(document.getElementById('minInterval').value),
+            buyPct: toNumber(document.getElementById('buyPct').value) / 100,
+            sellPct: toNumber(document.getElementById('sellPct').value) / 100,
+            trades: [],
+            series: { timeSeries: [], priceSeries: [], equitySeries: [] },
+            final: { cash: 0, position: 0, lastPrice: NaN, finalEquity: 0, profit: 0, roi: 0 }
+          });
+          renderTrades([]);
+          renderChart({ timeSeries: [], priceSeries: [], equitySeries: [] });
+          alert('day_saved 没有数据：请先访问一次 /api/today 让服务把 1d 数据写入 sqlite，或确认 data/gold.sqlite 存在。');
+          return;
+        }
+
+        const params = {
+          startCash: document.getElementById('startCash').value,
+          risk: document.getElementById('risk').value,
+          minIntervalMin: document.getElementById('minInterval').value,
+          buyPct: document.getElementById('buyPct').value,
+          sellPct: document.getElementById('sellPct').value,
+          autoSize: document.getElementById('autoSize')?.checked,
+        };
+
+        const result = simulate(rows, params);
+        renderMetrics(result);
+        renderTrades(result.trades);
+        renderChart(result.series, result.trades);
+      } catch (e) {
+        console.error(e);
+        alert(`模拟失败：${e?.message || e}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '运行模拟';
+      }
+    }
+
+    window.onload = function () {
+      const risk = document.getElementById('risk');
+      const riskText = document.getElementById('riskText');
+      riskText.textContent = risk.value;
+      risk.addEventListener('input', () => {
+        riskText.textContent = risk.value;
+      });
+
+      document.getElementById('btnRun').addEventListener('click', run);
+      document.getElementById('btnBack').addEventListener('click', () => {
+        window.location.href = './index.html';
+      });
+
+      const limitSel = document.getElementById('rowsLimit');
+      if (limitSel) {
+        limitSel.addEventListener('change', async () => {
+          try {
+            const rows = await loadRows();
+            renderGold1dChart(rows);
+          } catch {
+            // ignore
+          }
+        });
+      }
+
+      const normChk = document.getElementById('rowsNormalize');
+      if (normChk) {
+        normChk.addEventListener('change', async () => {
+          try {
+            const rows = await loadRows();
+            renderGold1dChart(rows);
+          } catch {
+            // ignore
+          }
+        });
+      }
+
+      // 首次自动跑一次
+      run();
+    };
+  </script>
+</body>
+
+</html>

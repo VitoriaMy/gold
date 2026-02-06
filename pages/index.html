@@ -433,6 +433,7 @@
 <body>
     <div class="toolbar">
         <button id="btnExportPdf" type="button">导出PDF(打印)</button>
+        <button id="btnSim" type="button">自动化模拟</button>
     </div>
     <div id="container">
         <div class="print-header">
@@ -1961,6 +1962,13 @@ ${containerHtml}
             const btn = document.getElementById('btnExportPdf');
             if (btn) {
                 btn.addEventListener('click', exportContainerToPdf);
+            }
+
+            const sim = document.getElementById('btnSim');
+            if (sim) {
+                sim.addEventListener('click', () => {
+                    window.location.href = './sim.html';
+                });
             }
 
             // 支持直接用浏览器菜单打印时，也能更新时间并 resize。

@@ -2,7 +2,7 @@ import { Router } from "express";
 import * as dataAPI from "./dataAPI.js";
 import query from "./query.js";
 import { upsertGoldSeries } from "../db/goldSeries.js";
-import { readGoldSeries } from "../db/goldRead.js";
+import { readGoldSeries, readGoldSeriesRecentHours } from "../db/goldRead.js";
 
 
 const router = Router();
@@ -71,6 +71,17 @@ router.get("/month", async (req, res) => {
 router.get("/month_saved", async (req, res) => {
     try {
         const rows = await readGoldSeries("30d");
+        res.json(rows);
+    } catch (e) {
+        res.status(500).send(e?.message || "DB error");
+    }
+});
+
+// Read-only: returns already saved 1d series from sqlite (default: last 24 hours).
+router.get("/day_saved", async (req, res) => {
+    try {
+        const hours = req.query?.hours;
+        const rows = await readGoldSeriesRecentHours("1d", hours ?? 24);
         res.json(rows);
     } catch (e) {
         res.status(500).send(e?.message || "DB error");
