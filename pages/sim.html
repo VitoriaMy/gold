@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>自动化模拟-近24小时</title>
+  <title>自动化模拟</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -158,7 +158,7 @@
 
 <body>
   <div class="toolbar">
-    <span class="title">自动化模拟（近24小时，基于保存的 gold_1d）</span>
+    <span class="title" id="simTitle">自动化模拟</span>
 
     <div class="field">
       <label>起始资金</label>
@@ -213,7 +213,7 @@
 
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-weight:800;">gold_1d 可视化（近24小时）</div>
+        <div style="font-weight:800;" id="goldChartTitle">gold_1d 可视化（近24小时）</div>
         <div class="muted" id="rowsMeta"></div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
           <label class="muted" style="display:flex;align-items:center;gap:6px;">
@@ -234,6 +234,14 @@
 
     <div class="card">
       <div id="equityChart"></div>
+    </div>
+
+    <div class="card" id="riskEquityCard">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="font-weight:800;">风险偏好最终权益分布</div>
+        <div class="muted">x=风险偏好(0~100)，y=最终权益</div>
+      </div>
+      <div id="riskEquityChart" style="width:100%;height:320px;"></div>
     </div>
 
     <div class="card" style="max-height: 460px; overflow: auto;">
@@ -262,6 +270,49 @@
   <script src="./static/vintage.js"></script>
 
   <script>
+    function getSimRange() {
+      try {
+        const sp = new URLSearchParams(window.location.search || '');
+        const r = (sp.get('range') || '').trim();
+        if (r === '30d') return '30d';
+        return '1d';
+      } catch {
+        return '1d';
+      }
+    }
+
+    const SIM_RANGE = getSimRange();
+    const SIM_TABLE = SIM_RANGE === '30d' ? 'gold_30d' : 'gold_1d';
+    const SIM_RANGE_TEXT = SIM_RANGE === '30d' ? '近30天' : '近24小时';
+
+    function applySimPageText() {
+      const titleText = `自动化模拟（${SIM_RANGE_TEXT}，基于保存的 ${SIM_TABLE}）`;
+      try { document.title = titleText; } catch { /* ignore */ }
+
+      const t = document.getElementById('simTitle');
+      if (t) t.textContent = titleText;
+
+      const ct = document.getElementById('goldChartTitle');
+      if (ct) ct.textContent = `${SIM_TABLE} 可视化（${SIM_RANGE_TEXT}）`;
+
+      const hint = document.querySelector('.hint');
+      if (hint) {
+        hint.innerHTML = `
+          规则说明：
+          1) 使用保存的 <span class="muted">${SIM_TABLE}</span> ${SIM_RANGE_TEXT}数据逐点回放；每个时间点都会计算建议与权益。
+             最小间隔(min)指“两次实际成交之间的最小时间间隔”：只有当距离上一次成交≥最小间隔时，才允许触发下一笔交易。
+          2) 建议判定：若 当前价 ≤ 买入点 → 偏买入；若 当前价 ≥ 卖出点 → 偏卖出；否则观望。
+          3) 买入价 = 当前价；卖出价 = 当前价 - 3（固定），用于模拟“卖出打折/滑点”。
+          4) 每次买入=剩余现金的 X%（买入金额）；每次卖出=当前持仓的 Y%（卖出单位）。
+        `;
+      }
+
+      const riskCard = document.getElementById('riskEquityCard');
+      if (riskCard) {
+        riskCard.style.display = (SIM_RANGE === '30d') ? '' : 'none';
+      }
+    }
+
     function toNumber(v) {
       const n = Number(String(v ?? '').replace(/,/g, ''));
       return Number.isFinite(n) ? n : NaN;
@@ -725,7 +776,9 @@
       const sellPct = clamp(toNumber(params.sellPct) / 100, 0, 1);
       const autoSize = !!params.autoSize;
 
-      const lookbackWindowMs = 24 * 60 * 60 * 1000; // 仅使用“该时间点之前24小时”作为参考窗口
+      const lookbackWindowMs = (SIM_RANGE === '30d'
+        ? (30 * 24 * 60 * 60 * 1000)
+        : (24 * 60 * 60 * 1000));
 
       const minIntervalMs = minIntervalMin * 60 * 1000;
       const canTradeAt = (t, lastT) => (t - lastT) >= minIntervalMs;
@@ -864,6 +917,164 @@
       };
     }
 
+    function buildRiskList() {
+      const risks = [];
+      for (let r = 0; r <= 100; r++) risks.push(r);
+      return risks;
+    }
+
+    function simulateFinalEquityByRisk(rows, params) {
+      const sellOffset = 3;
+      const startCash = Math.max(0, toNumber(params.startCash));
+      const minIntervalMin = Math.max(1, Math.floor(toNumber(params.minIntervalMin)));
+      const buyPct = clamp(toNumber(params.buyPct) / 100, 0, 1);
+      const sellPct = clamp(toNumber(params.sellPct) / 100, 0, 1);
+      const autoSize = !!params.autoSize;
+
+      const lookbackWindowMs = (SIM_RANGE === '30d'
+        ? (30 * 24 * 60 * 60 * 1000)
+        : (24 * 60 * 60 * 1000));
+
+      const minIntervalMs = minIntervalMin * 60 * 1000;
+      const canTradeAt = (t, lastT) => (t - lastT) >= minIntervalMs;
+
+      const risks = buildRiskList();
+      const cash = risks.map(() => startCash);
+      const position = risks.map(() => 0);
+      const lastTradeTime = risks.map(() => -Infinity);
+
+      let windowStart = 0;
+      let lastPrice = NaN;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const t = toNumber(row?.date_time);
+        const price = toNumber(row?.price);
+        if (!Number.isFinite(t) || !Number.isFinite(price)) continue;
+        lastPrice = price;
+
+        const windowFloor = t - lookbackWindowMs;
+        while (windowStart < i) {
+          const tt = toNumber(rows[windowStart]?.date_time);
+          if (!Number.isFinite(tt) || tt < windowFloor) {
+            windowStart++;
+            continue;
+          }
+          break;
+        }
+
+        const windowRows = rows.slice(windowStart, i + 1);
+        const ctx = computeGold1dNormalizedContext({ rows: windowRows, currentPrice: price, minPoints: 12 });
+
+        for (let ri = 0; ri < risks.length; ri++) {
+          const risk = risks[ri];
+          const sug = computeBuySellSuggestionFromGold1dNormalizedContext(ctx, risk);
+          if (!sug || !canTradeAt(t, lastTradeTime[ri])) continue;
+
+          if (sug.action === '偏买入' && cash[ri] > 0 && buyPct > 0) {
+            const sizing = autoSize
+              ? inferTradeSizingFromSuggestion({
+                  side: 'BUY',
+                  currentPrice: price,
+                  buyRaw: sug.buyRaw,
+                  sellRaw: sug.sellRaw,
+                  stdRaw: sug.stdRaw,
+                  k: sug.k,
+                  maxFraction: buyPct,
+                })
+              : { fraction: buyPct, strength: 1, z: 0 };
+
+            const frac = sizing.fraction;
+            const spend = cash[ri] * frac;
+            const buyPrice = price;
+            const qty = buyPrice > 0 ? (spend / buyPrice) : 0;
+            if (qty > 0) {
+              cash[ri] -= spend;
+              position[ri] += qty;
+              lastTradeTime[ri] = t;
+            }
+          } else if (sug.action === '偏卖出' && position[ri] > 0 && sellPct > 0) {
+            const sizing = autoSize
+              ? inferTradeSizingFromSuggestion({
+                  side: 'SELL',
+                  currentPrice: price,
+                  buyRaw: sug.buyRaw,
+                  sellRaw: sug.sellRaw,
+                  stdRaw: sug.stdRaw,
+                  k: sug.k,
+                  maxFraction: sellPct,
+                })
+              : { fraction: sellPct, strength: 1, z: 0 };
+
+            const frac = sizing.fraction;
+            const qty = position[ri] * frac;
+            const sellPrice = Math.max(0, price - sellOffset);
+            const proceeds = qty * sellPrice;
+            if (qty > 0 && sellPrice > 0) {
+              position[ri] -= qty;
+              cash[ri] += proceeds;
+              lastTradeTime[ri] = t;
+            }
+          }
+        }
+      }
+
+      const lp = Number.isFinite(lastPrice) ? lastPrice : 0;
+      return risks.map((risk, i) => ({
+        risk,
+        finalEquity: cash[i] + position[i] * lp,
+      }));
+    }
+
+    let riskEquityChart;
+    function renderRiskEquityChart(rows, params) {
+      if (SIM_RANGE !== '30d') return;
+      if (!window.echarts) return;
+
+      const el = document.getElementById('riskEquityChart');
+      if (!el) return;
+
+      if (!riskEquityChart) {
+        riskEquityChart = echarts.init(el, 'vintage', { renderer: 'canvas' });
+        window.addEventListener('resize', () => riskEquityChart && riskEquityChart.resize());
+      }
+
+      const pts = simulateFinalEquityByRisk(rows, params);
+      const xs = pts.map(p => p.risk);
+      const ys = pts.map(p => p.finalEquity);
+
+      riskEquityChart.setOption({
+        title: { text: '风险偏好 vs 最终权益（近30天）', left: '1%' },
+        tooltip: {
+          trigger: 'axis',
+          formatter: (params) => {
+            const p = Array.isArray(params) ? params[0] : params;
+            const r = p?.axisValue;
+            const v = Number(p?.value);
+            return `risk=${r}<br/>最终权益: <b>${Number.isFinite(v) ? fmtMoney(v) : '-'}</b>`;
+          }
+        },
+        grid: { left: 56, right: 20, top: 50, bottom: 40, containLabel: true },
+        xAxis: {
+          type: 'category',
+          data: xs,
+          name: 'risk',
+          axisLabel: { interval: 9 }
+        },
+        yAxis: { type: 'value', name: 'finalEquity', scale: true },
+        series: [
+          {
+            name: 'finalEquity',
+            type: 'line',
+            data: ys,
+            showSymbol: false,
+            smooth: true,
+            lineStyle: { width: 2 }
+          }
+        ]
+      }, true);
+    }
+
     let chart;
     let gold1dChart;
     function renderChart(series, trades) {
@@ -898,7 +1109,7 @@
       }
 
       chart.setOption({
-        title: { text: '权益曲线 vs 价格(近24小时)', left: '1%' },
+        title: { text: `权益曲线 vs 价格（${SIM_RANGE_TEXT}）`, left: '1%' },
         tooltip: { trigger: 'axis' },
         legend: { data: ['equity', 'price', 'BUY', 'SELL'], right: 10 },
         grid: { left: 56, right: 40, top: 50, bottom: 40, containLabel: true },
@@ -990,7 +1201,7 @@
       if (!total) {
         if (meta) meta.textContent = '无数据';
         gold1dChart.setOption({
-          title: { text: 'gold_1d price', left: '1%' },
+          title: { text: `${SIM_TABLE} price`, left: '1%' },
           xAxis: { type: 'category', data: [] },
           yAxis: { type: 'value' },
           series: [{ type: 'line', data: [] }]
@@ -1014,7 +1225,7 @@
       const yDataNorm = normInfo ? normInfo.normalized.map(r => toNumber(r?.price_norm)) : [];
 
       gold1dChart.setOption({
-        title: { text: useNorm ? 'gold_1d price + normalized' : 'gold_1d price', left: '1%' },
+        title: { text: useNorm ? `${SIM_TABLE} price + normalized` : `${SIM_TABLE} price`, left: '1%' },
         tooltip: {
           trigger: 'axis',
           formatter: (params) => {
@@ -1115,7 +1326,11 @@
     }
 
     async function loadRows() {
-      const resp = await fetch('./api/day_saved?hours=24');
+      const url = SIM_RANGE === '30d'
+        ? './api/month_saved'
+        : './api/day_saved?hours=24';
+
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const rows = Array.isArray(data) ? data : [];
@@ -1144,7 +1359,11 @@
           });
           renderTrades([]);
           renderChart({ timeSeries: [], priceSeries: [], equitySeries: [] });
-          alert('day_saved 没有数据：请先访问一次 /api/today 让服务把 1d 数据写入 sqlite，或确认 data/gold.sqlite 存在。');
+          if (SIM_RANGE === '30d') {
+            alert('month_saved 没有数据：请先访问一次 /api/month 让服务把 30d 数据写入 sqlite，或确认 data/gold.sqlite 存在。');
+          } else {
+            alert('day_saved 没有数据：请先访问一次 /api/today 让服务把 1d 数据写入 sqlite，或确认 data/gold.sqlite 存在。');
+          }
           return;
         }
 
@@ -1161,6 +1380,11 @@
         renderMetrics(result);
         renderTrades(result.trades);
         renderChart(result.series, result.trades);
+
+        // 仅在 30d 模式下渲染分布图
+        if (SIM_RANGE === '30d') {
+          renderRiskEquityChart(rows, params);
+        }
       } catch (e) {
         console.error(e);
         alert(`模拟失败：${e?.message || e}`);
@@ -1171,6 +1395,8 @@
     }
 
     window.onload = function () {
+      applySimPageText();
+
       const risk = document.getElementById('risk');
       const riskText = document.getElementById('riskText');
       riskText.textContent = risk.value;

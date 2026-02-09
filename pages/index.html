@@ -433,7 +433,8 @@
 <body>
     <div class="toolbar">
         <button id="btnExportPdf" type="button">导出PDF(打印)</button>
-        <button id="btnSim" type="button">自动化模拟</button>
+        <button id="btnSim" type="button">自动化模拟(24h)</button>
+        <button id="btnSim30" type="button">自动化模拟(30d)</button>
     </div>
     <div id="container">
         <div class="print-header">
@@ -1967,7 +1968,14 @@ ${containerHtml}
             const sim = document.getElementById('btnSim');
             if (sim) {
                 sim.addEventListener('click', () => {
-                    window.location.href = './sim.html';
+                    window.location.href = './sim.html?range=1d';
+                });
+            }
+
+            const sim30 = document.getElementById('btnSim30');
+            if (sim30) {
+                sim30.addEventListener('click', () => {
+                    window.location.href = './sim.html?range=30d';
                 });
             }
 
